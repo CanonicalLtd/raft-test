@@ -42,9 +42,11 @@ type Cluster struct {
 	// connections. The default is true.
 	AutoConnectNodes bool
 
-	nodes               []*Node       // All nodes in the cluster
-	leadershipChangedCh chan *Node    // Notify leadership changes
-	output              *bytes.Buffer // Log output produced by nodes
+	// Output stream for logging
+	LogOutput *bytes.Buffer
+
+	nodes               []*Node    // All nodes in the cluster
+	leadershipChangedCh chan *Node // Notify leadership changes
 }
 
 // NewCluster creates a new cluster comprised of n Nodes created with
@@ -71,8 +73,8 @@ func NewUnstartedCluster(n int) *Cluster {
 		Timeout:              5 * time.Second,
 		MaxLeadershipChanges: 1024,
 		AutoConnectNodes:     true,
+		LogOutput:            output,
 		nodes:                nodes,
-		output:               output,
 	}
 }
 
@@ -100,11 +102,6 @@ func (c *Cluster) Shutdown() {
 // Node returns the i-th node of the cluster.
 func (c *Cluster) Node(i int) *Node {
 	return c.nodes[i]
-}
-
-// LogOutput returns the log output emitted by all nodes in the cluster.
-func (c *Cluster) LogOutput() string {
-	return c.output.String()
 }
 
 // LeadershipChanged returns the next node whose leadership state in

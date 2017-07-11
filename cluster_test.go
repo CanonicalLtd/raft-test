@@ -31,7 +31,7 @@ func TestCluster_LogOutput(t *testing.T) {
 	defer cluster.Shutdown()
 
 	cluster.LeadershipAcquired()
-	if output := cluster.LogOutput(); !strings.Contains(output, "[DEBUG] raft") {
+	if output := cluster.LogOutput.String(); !strings.Contains(output, "[DEBUG] raft") {
 		t.Errorf("output does not seem to be a raft log:\n%s", output)
 	}
 }
