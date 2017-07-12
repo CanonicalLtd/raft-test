@@ -17,6 +17,7 @@ package rafttest
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"reflect"
 	"time"
 
@@ -46,27 +47,27 @@ type Cluster struct {
 	LogOutput *bytes.Buffer
 
 	nodes               []*Node    // All nodes in the cluster
-	leadershipChangedCh chan *Node // Notify leadership changes
+	leadershipChangedCh chan *Node // Cluster-wide leadership changes
 }
 
 // NewCluster creates a new cluster comprised of n Nodes created with
-// default raft dependencies. All LoopbackTransport instances will
-// automatically be connected to each other and the NodeStore
-// instances populated with the addresses of the other nodes.
+// default raft dependencies.
 func NewCluster(n int) *Cluster {
-	cluster := NewUnstartedCluster(n)
-	cluster.Start()
-	return cluster
-}
-
-// NewUnstartedCluster returns a cluster whose nodes have not been
-// started yet. This allows for configuration tweaks, for instance.
-func NewUnstartedCluster(n int) *Cluster {
 	nodes := make([]*Node, n)
 	output := bytes.NewBuffer(nil)
 
 	for i := range nodes {
-		nodes[i] = NewUnstartedNode(fmt.Sprintf("%d", i), output)
+		node := NewNode()
+
+		// Use progressive numbers as network addressess.
+		addr := fmt.Sprintf("%d", i)
+		_, node.Transport = raft.NewInmemTransport(addr)
+
+		// Logging
+		prefix := fmt.Sprintf("%d: ", i)
+		node.Config.Logger = log.New(output, prefix, log.Lmicroseconds)
+
+		nodes[i] = node
 	}
 
 	return &Cluster{
@@ -78,7 +79,11 @@ func NewUnstartedCluster(n int) *Cluster {
 	}
 }
 
-// Start all the raft nodes in the cluster.
+// Start all the raft nodes in the cluster. By default, all
+// LoopbackTransport instances will automatically be connected to each
+// other and the PeerStore instances populated with the addresses of
+// the other nodes. This behavior can be turned on off by setting the
+// AutoConnectNodes attribute to false.
 func (c *Cluster) Start() {
 	if c.AutoConnectNodes {
 		connectLoobackTransports(c.nodes)
@@ -86,7 +91,7 @@ func (c *Cluster) Start() {
 	}
 
 	c.leadershipChangedCh = make(chan *Node, c.MaxLeadershipChanges)
-	go c.consumeNotifyCh()
+	c.consumeNotifyCh()
 	for _, node := range c.nodes {
 		node.Start()
 	}
@@ -96,6 +101,7 @@ func (c *Cluster) Start() {
 func (c *Cluster) Shutdown() {
 	for _, node := range c.nodes {
 		node.Shutdown()
+		close(node.Config.NotifyCh)
 	}
 }
 
@@ -169,27 +175,31 @@ func (c *Cluster) consumeNotifyCh() {
 	cases := make([]reflect.SelectCase, len(c.nodes))
 
 	for i, node := range c.nodes {
-		if node.notifyCh == nil || node.Config.NotifyCh != node.notifyCh {
-			panic(fmt.Sprintf("no valid notification channel for node %d", i))
+		if node.Config.NotifyCh != nil {
+			panic("non-nil NotifyCh on node: cluster needs to set its own")
 		}
+		notifyCh := make(chan bool, 0)
+		node.Config.NotifyCh = notifyCh
 		cases[i] = reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(node.notifyCh),
+			Chan: reflect.ValueOf(notifyCh),
 		}
 	}
 
 	// Loop until all nodes have shutdown and closed their
 	// notifyCh.
-	for len(cases) > 0 {
-		i, _, ok := reflect.Select(cases)
-		if !ok {
-			// Remove from the select cases the notify
-			// channels that have been closed, since that
-			// means the node was shutdown.
-			cases = append(cases[:i], cases[i+1:]...)
+	go func() {
+		for len(cases) > 0 {
+			i, _, ok := reflect.Select(cases)
+			if !ok {
+				// Remove from the select cases the notify
+				// channels that have been closed, since that
+				// means the node was shutdown.
+				cases = append(cases[:i], cases[i+1:]...)
+			}
+			c.leadershipChangedCh <- c.nodes[i]
 		}
-		c.leadershipChangedCh <- c.nodes[i]
-	}
+	}()
 }
 
 // Convert a regular Transport to a LoopbackTransport, or panic if the

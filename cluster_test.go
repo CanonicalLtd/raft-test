@@ -28,6 +28,7 @@ import (
 
 func TestCluster_LogOutput(t *testing.T) {
 	cluster := rafttest.NewCluster(3)
+	cluster.Start()
 	defer cluster.Shutdown()
 
 	cluster.LeadershipAcquired()
@@ -37,7 +38,7 @@ func TestCluster_LogOutput(t *testing.T) {
 }
 
 func TestCluster_AutoConnectWithNonLoopbackTransport(t *testing.T) {
-	cluster := rafttest.NewUnstartedCluster(2)
+	cluster := rafttest.NewCluster(2)
 	cluster.Node(0).Transport, _ = raft.NewTCPTransport("", nil, 0, time.Second, nil)
 	const want = "transport does not implement loopback interface"
 	defer func() {
@@ -57,7 +58,7 @@ func TestCluster_PeerStoreError(t *testing.T) {
 	defer os.RemoveAll(dir)
 	ioutil.WriteFile(filepath.Join(dir, "peers.json"), []byte("}gar![age"), 0600)
 
-	cluster := rafttest.NewUnstartedCluster(3)
+	cluster := rafttest.NewCluster(3)
 	node := cluster.Node(0)
 	node.Peers = raft.NewJSONPeers(dir, node.Transport)
 
@@ -77,6 +78,7 @@ func TestCluster_PeerStoreError(t *testing.T) {
 
 func TestCluster_LeadershipChanged(t *testing.T) {
 	cluster := rafttest.NewCluster(3)
+	cluster.Start()
 	defer cluster.Shutdown()
 
 	node := cluster.LeadershipAcquired()
@@ -91,6 +93,7 @@ func TestCluster_LeadershipChanged(t *testing.T) {
 
 func TestCluster_LeadershipChangedTimeout(t *testing.T) {
 	cluster := rafttest.NewCluster(3)
+	cluster.Start()
 	defer cluster.Shutdown()
 
 	cluster.LeadershipAcquired()
@@ -108,6 +111,7 @@ func TestCluster_LeadershipChangedTimeout(t *testing.T) {
 
 func TestCluster_LeaderKnown(t *testing.T) {
 	cluster := rafttest.NewCluster(3)
+	cluster.Start()
 	defer cluster.Shutdown()
 
 	leader := cluster.LeadershipAcquired()

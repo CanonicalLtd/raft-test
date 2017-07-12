@@ -16,7 +16,6 @@ package rafttest
 
 import (
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"time"
@@ -43,56 +42,33 @@ type Node struct {
 	Peers     raft.PeerStore
 	Transport raft.Transport
 
-	notifyCh chan bool
-	raft     *raft.Raft
+	Data interface{}
+
+	raft *raft.Raft
 }
 
 // NewNode creates a new raft test node with sane defaults. All
 // dependencies are created using in-memory implementations of the
 // relevant interfaces. The default FSM is a dummy one that no-ops
-// every method. If the given addr is the empty string, the node will
-// start in single-node mode.
-func NewNode(addr string) *Node {
-	node := NewUnstartedNode(addr, ioutil.Discard)
-	node.Start()
-	return node
-}
-
-// NewUnstartedNode creates a new test raft Node without starting its raft
-// engine.
-func NewUnstartedNode(addr string, output io.Writer) *Node {
-	notifyCh := make(chan bool, 0)
-
-	config := defaultConfig()
-	if addr == "" {
-		addr = "0"
-		config.EnableSingleNode = true
-	} else {
-		// Block leadership changes on this channel, it will
-		// be used by Cluster to know about leadership
-		// changes.
-		config.NotifyCh = notifyCh
-	}
-	config.Logger = log.New(output, fmt.Sprintf("%s: ", addr), log.Lmicroseconds)
-
-	_, transport := raft.NewInmemTransport(addr)
+// every method.
+func NewNode() *Node {
+	_, transport := raft.NewInmemTransport("")
 
 	return &Node{
 		Timeout:   5 * time.Second,
-		Config:    config,
+		Config:    defaultConfig(),
 		FSM:       &FSM{},
 		Logs:      raft.NewInmemStore(),
 		Stable:    raft.NewInmemStore(),
 		Snapshots: raft.NewDiscardSnapshotStore(),
 		Peers:     &raft.StaticPeers{},
 		Transport: transport,
-		notifyCh:  notifyCh,
 	}
 }
 
 // Start the node by instantiating its raft instance with the
 // configured dependencies. It panics if any error happens or if the
-// nodes has already been started.
+// node has already been started.
 func (n *Node) Start() {
 	if n.raft != nil {
 		panic("this node has already been started")
@@ -119,8 +95,6 @@ func (n *Node) Shutdown() {
 	// The shutdownFuture doesn't seem to possibly return any
 	// error, so let's not bother checking.
 	n.raft.Shutdown().Error()
-
-	close(n.notifyCh)
 }
 
 // Raft is the raft.Raft instance that was created when Started was
@@ -159,6 +133,7 @@ func (n *Node) IsLeader() bool {
 // configuration for use with in-memory transports.
 func defaultConfig() *raft.Config {
 	config := raft.DefaultConfig()
+	config.Logger = log.New(ioutil.Discard, "", 0)
 
 	// Decrease timeouts, since everything happens in-memory by
 	// default.

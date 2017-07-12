@@ -27,12 +27,13 @@ import (
 )
 
 func TestNode_StartAndShutdown(t *testing.T) {
-	node := rafttest.NewNode("")
+	node := rafttest.NewNode()
+	node.Start()
 	defer node.Shutdown()
 }
 
 func TestNode_StartTwice(t *testing.T) {
-	node := rafttest.NewUnstartedNode("", ioutil.Discard)
+	node := rafttest.NewNode()
 	node.Start()
 	defer node.Shutdown()
 
@@ -48,7 +49,9 @@ func TestNode_StartTwice(t *testing.T) {
 }
 
 func TestNode_LeaderKnown(t *testing.T) {
-	node := rafttest.NewNode("")
+	node := rafttest.NewNode()
+	node.Config.EnableSingleNode = true
+	node.Start()
 	defer node.Shutdown()
 
 	node.LeaderKnown()
@@ -59,7 +62,9 @@ func TestNode_LeaderKnown(t *testing.T) {
 }
 
 func TestNode_LeaderKnownTimeout(t *testing.T) {
-	node := rafttest.NewNode("0") // Pass an address to disable single-node mode
+	node := rafttest.NewNode()
+	_, node.Transport = raft.NewInmemTransport("0")
+	node.Start()
 	defer node.Shutdown()
 
 	node.Timeout = time.Microsecond
@@ -76,7 +81,9 @@ func TestNode_LeaderKnownTimeout(t *testing.T) {
 }
 
 func TestNode_RaftApplyAndSnapshot(t *testing.T) {
-	node := rafttest.NewNode("")
+	node := rafttest.NewNode()
+	node.Config.EnableSingleNode = true
+	node.Start()
 	defer node.Shutdown()
 	node.LeaderKnown()
 
@@ -97,7 +104,7 @@ func TestNode_StartRaftError(t *testing.T) {
 	defer os.RemoveAll(dir)
 	ioutil.WriteFile(filepath.Join(dir, "peers.json"), []byte("}gar![age"), 0600)
 
-	node := rafttest.NewUnstartedNode("", ioutil.Discard)
+	node := rafttest.NewNode()
 	node.Peers = raft.NewJSONPeers(dir, node.Transport)
 
 	const want = "failed to start raft"

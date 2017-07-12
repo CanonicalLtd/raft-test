@@ -18,12 +18,12 @@ import (
 	"testing"
 )
 
-func TestCluster_consumeNotifyChPanicsIfNoValidNotifyCh(t *testing.T) {
-	cluster := NewUnstartedCluster(1)
+func TestCluster_consumeNotifyChPanicsIfNotifyChIsSet(t *testing.T) {
+	cluster := NewCluster(1)
 	node := cluster.Node(0)
 	node.Config.NotifyCh = make(chan bool)
 
-	const want = "no valid notification channel for node 0"
+	const want = "non-nil NotifyCh on node: cluster needs to set its own"
 	defer func() {
 		got := recover()
 		if want != got {
