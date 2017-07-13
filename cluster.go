@@ -59,7 +59,7 @@ func NewCluster(n int) *Cluster {
 	for i := range nodes {
 		node := NewNode()
 
-		// Use progressive numbers as network addressess.
+		// Use progressive numbers as network addresses.
 		addr := fmt.Sprintf("%d", i)
 		_, node.Transport = raft.NewInmemTransport(addr)
 
@@ -156,7 +156,7 @@ func (c *Cluster) Peers(node *Node) []*Node {
 	return others
 }
 
-// Disconnect the network transport of the given nodes from the ther
+// Disconnect the network transport of the given nodes from the their
 // nodes.
 func (c *Cluster) Disconnect(node *Node) {
 	thisTransport := loopbackTransport(node.Transport)

@@ -114,7 +114,7 @@ func TestNode_StartRaftError(t *testing.T) {
 			t.Errorf("recover didn't return a string")
 		}
 		if !strings.Contains(got, want) {
-			t.Errorf("expected\n%q\nto contain\n%q", got, want)
+			t.Errorf("%q\ndoes not contain\n%q", got, want)
 		}
 	}()
 
