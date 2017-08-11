@@ -17,7 +17,7 @@ package rafttest_test
 import (
 	"testing"
 
-	"github.com/dqlite/raft-test"
+	"github.com/CanonicalLtd/raft-test"
 )
 
 func TestFSM_Restore(t *testing.T) {
