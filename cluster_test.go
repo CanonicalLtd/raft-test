@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dqlite/raft-test"
+	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
 )
 
