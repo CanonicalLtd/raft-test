@@ -20,27 +20,41 @@ import (
 	"github.com/hashicorp/raft"
 )
 
-// FSM is a dummy raft finite state machine that does nothing and
+// FSM create a dummy FSMs.
+func FSM() raft.FSM {
+	return &fsm{}
+}
+
+// FSMs creates the given number of dummy FSMs.
+func FSMs(n int) []raft.FSM {
+	fsms := make([]raft.FSM, n)
+	for i := range fsms {
+		fsms[i] = FSM()
+	}
+	return fsms
+}
+
+// fsm is a dummy raft finite state machine that does nothing and
 // always no-ops.
-type FSM struct{}
+type fsm struct{}
 
 // Apply always return a nil error without doing anything.
-func (f *FSM) Apply(*raft.Log) interface{} { return nil }
+func (f *fsm) Apply(*raft.Log) interface{} { return nil }
 
 // Snapshot always return a dummy snapshot and no error without doing
 // anything.
-func (f *FSM) Snapshot() (raft.FSMSnapshot, error) { return &FSMSnapshot{}, nil }
+func (f *fsm) Snapshot() (raft.FSMSnapshot, error) { return &fsmSnapshot{}, nil }
 
 // Restore always return a nil error without reading anything from
 // the reader.
-func (f *FSM) Restore(io.ReadCloser) error { return nil }
+func (f *fsm) Restore(io.ReadCloser) error { return nil }
 
-// FSMSnapshot a dummy implementation of an FSM snapshot.
-type FSMSnapshot struct{}
+// fsmSnapshot a dummy implementation of an fsm snapshot.
+type fsmSnapshot struct{}
 
 // Persist always return a nil error without writing anything
 // to the sink.
-func (s *FSMSnapshot) Persist(sink raft.SnapshotSink) error { return nil }
+func (s *fsmSnapshot) Persist(sink raft.SnapshotSink) error { return nil }
 
 // Release is a no-op.
-func (s *FSMSnapshot) Release() {}
+func (s *fsmSnapshot) Release() {}

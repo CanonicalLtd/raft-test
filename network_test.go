@@ -15,6 +15,7 @@
 package rafttest_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -23,10 +24,36 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNode_StartAndShutdown(t *testing.T) {
-	r := rafttest.Node(t, rafttest.FSM())
-	assert.Equal(t, raft.Leader, r.State())
-	assert.Equal(t, "0", r.Leader())
-	assert.NoError(t, r.Apply([]byte{}, time.Second).Error())
-	assert.NoError(t, r.Shutdown().Error())
+func TestNetwork_Disconnect(t *testing.T) {
+	notify := rafttest.Notify()
+	network := rafttest.Network()
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify, network)
+	defer cleanup()
+
+	i := notify.NextAcquired(time.Second)
+	network.Disconnect(i)
+
+	j := notify.NextLost(time.Second)
+
+	assert.True(t, i == j)
+	assert.False(t, rafts[i].State() == raft.Leader)
+}
+
+func TestNetwork_DisconnectInvalidIndex(t *testing.T) {
+	network := rafttest.Network()
+	_, cleanup := rafttest.Cluster(&testing.T{}, rafttest.FSMs(3), network)
+	defer cleanup()
+
+	succeeded := false
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		network.Disconnect(1000)
+		succeeded = true
+	}()
+	wg.Wait()
+
+	assert.False(t, succeeded)
 }

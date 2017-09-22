@@ -21,7 +21,7 @@ import (
 )
 
 func TestFSM_Restore(t *testing.T) {
-	fsm := &rafttest.FSM{}
+	fsm := rafttest.FSM()
 	if err := fsm.Restore(nil); err != nil {
 		t.Fatal(err)
 	}

@@ -15,113 +15,39 @@
 package rafttest_test
 
 import (
-	"io/ioutil"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestCluster_LogOutput(t *testing.T) {
-	cluster := rafttest.NewCluster(3)
-	cluster.Start()
-	defer cluster.Shutdown()
+// Create and shutdown a cluster.
+func TestCluster_CreateAndShutdown(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
+	defer cleanup()
 
-	cluster.LeadershipAcquired()
-	if output := cluster.LogOutput.String(); !strings.Contains(output, "[DEBUG] raft") {
-		t.Errorf("output does not seem to be a raft log:\n%s", output)
-	}
+	assert.Len(t, rafts, 1)
 }
 
-func TestCluster_AutoConnectWithNonLoopbackTransport(t *testing.T) {
-	cluster := rafttest.NewCluster(2)
-	cluster.Node(0).Transport, _ = raft.NewTCPTransport("", nil, 0, time.Second, nil)
-	const want = "transport does not implement loopback interface"
-	defer func() {
-		got := recover()
-		if want != got {
-			t.Fatalf("expected panic\n%q\ngot\n%q", want, got)
-		}
-	}()
-	cluster.Start()
+// Get a node other than the leader.
+func TestOther(t *testing.T) {
+	notify := rafttest.Notify()
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
+	defer cleanup()
+
+	i := notify.NextAcquired(time.Second)
+	j := rafttest.Other(rafts, i)
+
+	assert.NotEqual(t, i, j)
+	assert.NotEqual(t, raft.Leader, rafts[j].State())
 }
 
-func TestCluster_PeerStoreError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "go-rafttest-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-	ioutil.WriteFile(filepath.Join(dir, "peers.json"), []byte("}gar![age"), 0600)
+// If there's only a single node, Other returns -1.
+func TestOther_SingleNode(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
+	defer cleanup()
 
-	cluster := rafttest.NewCluster(3)
-	node := cluster.Node(0)
-	node.Peers = raft.NewJSONPeers(dir, node.Transport)
-
-	const want = "failed to get peers for node 0"
-	defer func() {
-		got, ok := recover().(string)
-		if !ok {
-			t.Errorf("recover didn't return a string")
-		}
-		if !strings.Contains(got, want) {
-			t.Errorf("%q\ndoes not contain\n%q", got, want)
-		}
-	}()
-
-	cluster.Start()
-}
-
-func TestCluster_LeadershipChanged(t *testing.T) {
-	cluster := rafttest.NewCluster(3)
-	cluster.Start()
-	defer cluster.Shutdown()
-
-	node := cluster.LeadershipAcquired()
-	if !node.IsLeader() {
-		t.Fatalf("node is not leader state %s", node.Raft().State())
-	}
-	cluster.Disconnect(node)
-	if cluster.LeadershipLost() != node {
-		t.Fatalf("leader node was not the one losing leadership")
-	}
-}
-
-func TestCluster_LeadershipChangedTimeout(t *testing.T) {
-	cluster := rafttest.NewCluster(3)
-	cluster.Start()
-	defer cluster.Shutdown()
-
-	cluster.LeadershipAcquired()
-	cluster.Timeout = time.Microsecond
-
-	const want = "timeout waiting for leadership change"
-	defer func() {
-		got := recover()
-		if want != got {
-			t.Fatalf("expected panic\n%q\ngot\n%q", want, got)
-		}
-	}()
-	cluster.LeadershipAcquired()
-}
-
-func TestCluster_LeaderKnown(t *testing.T) {
-	cluster := rafttest.NewCluster(3)
-	cluster.Start()
-	defer cluster.Shutdown()
-
-	leader := cluster.LeadershipAcquired()
-	leader.Raft().VerifyLeader().Error()
-	follower := cluster.Peers(leader)[0]
-	follower.LeaderKnown()
-
-	want := leader.Transport.LocalAddr()
-	got := follower.Raft().Leader()
-	if want != got {
-		t.Errorf("expected leader address\n%q\ngot\n%q", want, got)
-	}
+	assert.Equal(t, -1, rafttest.Other(rafts, 0))
 }

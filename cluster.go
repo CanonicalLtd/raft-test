@@ -15,210 +15,153 @@
 package rafttest
 
 import (
-	"bytes"
 	"fmt"
 	"log"
-	"reflect"
+	"strconv"
+	"testing"
 	"time"
 
 	"github.com/hashicorp/raft"
 )
 
-// Cluster keeps tracks of one or more Nodes belonging to a test
-// cluster.
-type Cluster struct {
-	// Apply this timeout to any Cluster method that could
-	// possibly block indefinitely, and panic if the time expires
-	// during the method execution. It's 5 seconds by default.
-	Timeout time.Duration
-
-	// Maximum number of expect of leadership changes expected
-	// during the lifetime of the cluster. Since these changes are
-	// buffered in a channel, their upper bound must be known
-	// beforehands. The default is 1024.
-	MaxLeadershipChanges int
-
-	// Whether to automatically connect the nodes of the cluster
-	// to each other. If false, user code must manually create the
-	// connections. The default is true.
-	AutoConnectNodes bool
-
-	// Output stream for logging
-	LogOutput *bytes.Buffer
-
-	nodes               []*Node    // All nodes in the cluster
-	leadershipChangedCh chan *Node // Cluster-wide leadership changes
-}
-
-// NewCluster creates a new cluster comprised of n Nodes created with
-// default raft dependencies.
-func NewCluster(n int) *Cluster {
-	nodes := make([]*Node, n)
-	output := bytes.NewBuffer(nil)
-
-	for i := range nodes {
-		node := NewNode()
-
-		// Use progressive numbers as network addresses.
-		addr := fmt.Sprintf("%d", i)
-		_, node.Transport = raft.NewInmemTransport(addr)
-
-		// Logging
-		prefix := fmt.Sprintf("%d: ", i)
-		node.Config.Logger = log.New(output, prefix, log.Lmicroseconds)
-
-		nodes[i] = node
+// Cluster creates n raft nodes, one for each of the given FSMs.
+//
+// Each raft.Raft instance is created with sane test-oriented dependencies,
+// such as in-memory transports and very low timeouts.
+func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
+	n := len(fsms)
+	cluster := &cluster{
+		t:     t,
+		nodes: make(map[int]*node, n),
 	}
 
-	return &Cluster{
-		Timeout:              5 * time.Second,
-		MaxLeadershipChanges: 1024,
-		AutoConnectNodes:     true,
-		LogOutput:            output,
-		nodes:                nodes,
-	}
-}
-
-// Start all the raft nodes in the cluster. By default, all
-// LoopbackTransport instances will automatically be connected to each
-// other and the PeerStore instances populated with the addresses of
-// the other nodes. This behavior can be turned on off by setting the
-// AutoConnectNodes attribute to false.
-func (c *Cluster) Start() {
-	if c.AutoConnectNodes {
-		connectLoobackTransports(c.nodes)
-		populateNodeStores(c.nodes)
+	stores := make([]raft.PeerStore, n)
+	transports := make([]raft.LoopbackTransport, n)
+	for i := 0; i < n; i++ {
+		cluster.nodes[i] = newNode(t, strconv.Itoa(i))
+		transports[i] = cluster.nodes[i].Transport.(raft.LoopbackTransport)
+		stores[i] = cluster.nodes[i].Peers
 	}
 
-	c.leadershipChangedCh = make(chan *Node, c.MaxLeadershipChanges)
-	c.consumeNotifyCh()
-	for _, node := range c.nodes {
-		node.Start()
+	connectLoobackTransports(transports)
+	populatePeerStores(stores, transports)
+
+	for _, knob := range knobs {
+		knob.init(cluster)
 	}
-}
 
-// Shutdown all the raft nodes in the cluster.
-func (c *Cluster) Shutdown() {
-	for _, node := range c.nodes {
-		node.Shutdown()
-		close(node.Config.NotifyCh)
+	rafts := make([]*raft.Raft, n)
+	for i := range fsms {
+		raft, err := newRaft(fsms[i], cluster.nodes[i])
+		if err != nil {
+			t.Fatalf("failed to start test raft node %d: %v", i, err)
+		}
+		rafts[i] = raft
 	}
-}
 
-// Node returns the i-th node of the cluster.
-func (c *Cluster) Node(i int) *Node {
-	return c.nodes[i]
-}
-
-// LeadershipChanged returns the next node whose leadership state in
-// the cluster has changed, possibly blocking until it happens.
-func (c *Cluster) LeadershipChanged() *Node {
-	select {
-	case node := <-c.leadershipChangedCh:
-		return node
-	case <-time.After(c.Timeout):
-		panic("timeout waiting for leadership change")
+	cleanup := func() {
+		Shutdown(t, rafts)
+		for _, knob := range knobs {
+			knob.cleanup(cluster)
+		}
 	}
+
+	return rafts, cleanup
 }
 
-// LeadershipAcquired returns the next node that has acquired
-// leadership, possibly blocking until it happens.
-func (c *Cluster) LeadershipAcquired() *Node {
-	for {
-		node := c.LeadershipChanged()
-		if node.Raft().State() == raft.Leader {
-			return node
+// Knob can be used to tweak the dependencies of test Raft nodes created with
+// Cluster() or Node().
+type Knob interface {
+	init(*cluster)
+	cleanup(*cluster)
+}
+
+// Shutdown all the given raft nodes and fail the test if any of them errors
+// out while doing so.
+func Shutdown(t *testing.T, rafts []*raft.Raft) {
+	futures := make([]raft.Future, len(rafts))
+	for i, r := range rafts {
+		futures[i] = r.Shutdown()
+	}
+	for i, future := range futures {
+		if err := future.Error(); err != nil {
+			t.Fatalf("failed to shutdown raft node %d: %v", i, err)
 		}
 	}
 }
 
-// LeadershipLost returns the next node that has lost leadership,
-// possibly blocking until it happens.
-func (c *Cluster) LeadershipLost() *Node {
-	for {
-		node := c.LeadershipChanged()
-		if node.Raft().State() != raft.Leader {
-			return node
+// Other the index of a raft.Raft node which differs from the given one.
+//
+// This is useful in combination with Notify to get a node that is not
+// currently in leader state.
+func Other(rafts []*raft.Raft, i int) int {
+	for j := range rafts {
+		if i != j {
+			return j
 		}
 	}
+	return -1
 }
 
-// Peers returns all nodes that are not the given one. This is useful
-// in combination with LeadershipAcquired to get all nodes that
-// are currently not in leader state.
-func (c *Cluster) Peers(node *Node) []*Node {
-	others := []*Node{}
-	for _, other := range c.nodes {
-		if other != node {
-			others = append(others, other)
-		}
-	}
-	return others
+type cluster struct {
+	t     *testing.T
+	nodes map[int]*node // Options for node N.
+}
+type node struct {
+	Config    *raft.Config
+	Logs      raft.LogStore
+	Stable    raft.StableStore
+	Snapshots raft.SnapshotStore
+	Peers     raft.PeerStore
+	Transport raft.Transport
 }
 
-// Disconnect the network transport of the given nodes from the their
-// nodes.
-func (c *Cluster) Disconnect(node *Node) {
-	thisTransport := loopbackTransport(node.Transport)
-	thisTransport.DisconnectAll()
-	for _, other := range c.nodes {
-		otherTransport := loopbackTransport(other.Transport)
-		otherTransport.Disconnect(node.Transport.LocalAddr())
-	}
-}
+// Create default dependencies for a single raft node.
+func newNode(t *testing.T, addr string) *node {
+	_, transport := raft.NewInmemTransport(addr)
 
-// Listen for leadership change notification across all nodes, using
-// their configured NotifyCh and fill our leadershipChangedCh with the
-// node that changed its leadership state. The internal loop will run
-// forever until all NotifyCh of our peers get closed.
-func (c *Cluster) consumeNotifyCh() {
-	cases := make([]reflect.SelectCase, len(c.nodes))
+	out := &testingWriter{t}
+	config := raft.DefaultConfig()
+	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), log.Ltime|log.Lmicroseconds)
 
-	for i, node := range c.nodes {
-		if node.Config.NotifyCh != nil {
-			panic("non-nil NotifyCh on node: cluster needs to set its own")
-		}
-		notifyCh := make(chan bool, 0)
-		node.Config.NotifyCh = notifyCh
-		cases[i] = reflect.SelectCase{
-			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(notifyCh),
-		}
+	// Decrease timeouts, since everything happens in-memory by
+	// default.
+	config.HeartbeatTimeout = 50 * time.Millisecond
+	config.ElectionTimeout = 50 * time.Millisecond
+	config.LeaderLeaseTimeout = 50 * time.Millisecond
+	config.CommitTimeout = 25 * time.Millisecond
+
+	options := &node{
+		Config:    config,
+		Logs:      raft.NewInmemStore(),
+		Stable:    raft.NewInmemStore(),
+		Snapshots: raft.NewDiscardSnapshotStore(),
+		Peers:     &raft.StaticPeers{},
+		Transport: transport,
 	}
 
-	// Loop until all nodes have shutdown and closed their
-	// notifyCh.
-	go func() {
-		for len(cases) > 0 {
-			i, _, ok := reflect.Select(cases)
-			if !ok {
-				// Remove from the select cases the notify
-				// channels that have been closed, since that
-				// means the node was shutdown.
-				cases = append(cases[:i], cases[i+1:]...)
-			}
-			c.leadershipChangedCh <- c.nodes[i]
-		}
-	}()
+	return options
 }
 
-// Convert a regular Transport to a LoopbackTransport, or panic if the
-// given transport does not implement LoopbackTransport.
-func loopbackTransport(transport raft.Transport) raft.LoopbackTransport {
-	loopbackTransport, ok := transport.(raft.LoopbackTransport)
-	if !ok {
-		panic("transport does not implement loopback interface")
-	}
-	return loopbackTransport
+// Convenience around raft.NewRaft for creating a new Raft instance using the
+// given dependencies.
+func newRaft(fsm raft.FSM, node *node) (*raft.Raft, error) {
+	return raft.NewRaft(
+		node.Config,
+		fsm,
+		node.Logs,
+		node.Stable,
+		node.Snapshots,
+		node.Peers,
+		node.Transport,
+	)
 }
 
-// Connect all the given transports to each other.
-func connectLoobackTransports(nodes []*Node) {
-	for i, node1 := range nodes {
-		for j, node2 := range nodes {
+// Connect all the given loopback transports to each other.
+func connectLoobackTransports(transports []raft.LoopbackTransport) {
+	for i, transport1 := range transports {
+		for j, transport2 := range transports {
 			if i != j {
-				transport1 := loopbackTransport(node1.Transport)
-				transport2 := loopbackTransport(node2.Transport)
 				transport1.Connect(transport2.LocalAddr(), transport2)
 				transport2.Connect(transport1.LocalAddr(), transport1)
 			}
@@ -226,15 +169,17 @@ func connectLoobackTransports(nodes []*Node) {
 	}
 }
 
-// Populate the node stores with the addresses of the other nodes.
-func populateNodeStores(nodes []*Node) {
-	for i := range nodes {
-		for j := range nodes {
+// Populate each node's peer store with the addresses of the other nodes.
+func populatePeerStores(stores []raft.PeerStore, transports []raft.LoopbackTransport) {
+	if len(stores) != len(transports) {
+		panic("peer stores and tranports length mismatch")
+	}
+
+	for i, store := range stores {
+		for j, transport := range transports {
 			if i == j {
 				continue
 			}
-			store := nodes[i].Peers
-			transport := nodes[j].Transport
 
 			addrs, err := store.Peers()
 			if err != nil {
@@ -242,7 +187,11 @@ func populateNodeStores(nodes []*Node) {
 					"failed to get peers for node %d: %v", i, err))
 			}
 
-			store.SetPeers(append(addrs, transport.LocalAddr()))
+			addrs = append(addrs, transport.LocalAddr())
+			if err := store.SetPeers(addrs); err != nil {
+				panic(fmt.Sprintf(
+					"failed to set peers for node %d: %v", i, err))
+			}
 
 		}
 	}

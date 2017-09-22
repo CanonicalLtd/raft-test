@@ -15,18 +15,36 @@
 package rafttest_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNode_StartAndShutdown(t *testing.T) {
-	r := rafttest.Node(t, rafttest.FSM())
-	assert.Equal(t, raft.Leader, r.State())
-	assert.Equal(t, "0", r.Leader())
-	assert.NoError(t, r.Apply([]byte{}, time.Second).Error())
-	assert.NoError(t, r.Shutdown().Error())
+func TestWaitLeader(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3))
+	defer cleanup()
+	rafttest.WaitLeader(t, rafts[0], time.Second)
+	assert.NotEqual(t, "", rafts[0].Leader())
+}
+
+func TestWaitLeader_Timeout(t *testing.T) {
+	// A node with a single node won't be able to perform an election.
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
+	defer cleanup()
+
+	succeeded := false
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		rafttest.WaitLeader(&testing.T{}, rafts[0], time.Microsecond)
+		succeeded = true
+	}()
+	wg.Wait()
+
+	assert.False(t, succeeded)
 }
