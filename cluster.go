@@ -31,8 +31,9 @@ import (
 func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
 	n := len(fsms)
 	cluster := &cluster{
-		t:     t,
-		nodes: make(map[int]*node, n),
+		t:           t,
+		nodes:       make(map[int]*node, n),
+		autoConnect: true,
 	}
 
 	stores := make([]raft.PeerStore, n)
@@ -43,11 +44,13 @@ func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 		stores[i] = cluster.nodes[i].Peers
 	}
 
-	connectLoobackTransports(transports)
-	populatePeerStores(stores, transports)
-
 	for _, knob := range knobs {
 		knob.init(cluster)
+	}
+
+	if cluster.autoConnect {
+		connectLoobackTransports(transports)
+		populatePeerStores(stores, transports)
 	}
 
 	rafts := make([]*raft.Raft, n)
@@ -104,8 +107,9 @@ func Other(rafts []*raft.Raft, i int) int {
 }
 
 type cluster struct {
-	t     *testing.T
-	nodes map[int]*node // Options for node N.
+	t           *testing.T
+	nodes       map[int]*node // Options for node N.
+	autoConnect bool          // Whether to automatically connect the transports
 }
 type node struct {
 	Config    *raft.Config
@@ -122,7 +126,7 @@ func newNode(t *testing.T, addr string) *node {
 
 	out := &testingWriter{t}
 	config := raft.DefaultConfig()
-	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), log.Ltime|log.Lmicroseconds)
+	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), 0)
 
 	// Decrease timeouts, since everything happens in-memory by
 	// default.
