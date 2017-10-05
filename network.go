@@ -108,7 +108,6 @@ func (k *NetworkKnob) init(cluster *cluster) {
 
 	if k.noAutoConnect {
 		cluster.autoConnect = false
-		cluster.nodes[0].Config.EnableSingleNode = true
 	}
 }
 

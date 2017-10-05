@@ -25,25 +25,14 @@ import (
 // could possibly be the instance itself).
 //
 // It fails the test if this doesn't happen within the specified timeout.
-func WaitLeader(t *testing.T, r *raft.Raft, timeout time.Duration) {
-	observations := make(chan raft.Observation, 64)
-	observer := raft.NewObserver(observations, false, leaderObservationFilter)
-
-	r.RegisterObserver(observer)
-	defer r.DeregisterObserver(observer)
-
-	if r.Leader() == "" {
-		select {
-		case <-observations:
-		case <-time.After(timeout):
-			t.Fatalf("no leader was set within %s", timeout)
+func WaitLeader(t *testing.T, raft *raft.Raft, timeout time.Duration) {
+	for timeout > 0 {
+		if raft.Leader() != "" {
+			return
 		}
+		pause := 25 * time.Millisecond
+		time.Sleep(pause)
+		timeout -= pause
 	}
-}
-
-// A raft.Observer filter function that returns true only if the
-// observation is a leader change observation.
-func leaderObservationFilter(observation *raft.Observation) bool {
-	_, ok := observation.Data.(raft.LeaderObservation)
-	return ok
+	t.Fatalf("no leader was set within %s", timeout)
 }

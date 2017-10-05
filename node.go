@@ -41,7 +41,6 @@ func (k *singleModeKnob) init(cluster *cluster) {
 	if len(cluster.nodes) != 1 {
 		panic("expected to have a cluster with exactly one node")
 	}
-	cluster.nodes[0].Config.EnableSingleNode = true
 	cluster.nodes[0].Config.StartAsLeader = true
 }
 
