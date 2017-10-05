@@ -36,21 +36,30 @@ func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 		autoConnect: true,
 	}
 
-	stores := make([]raft.PeerStore, n)
+	servers := make([]raft.Server, n)
 	transports := make([]raft.LoopbackTransport, n)
 	for i := 0; i < n; i++ {
-		cluster.nodes[i] = newNode(t, strconv.Itoa(i))
+		cluster.nodes[i] = newNode(t, i)
 		transports[i] = cluster.nodes[i].Transport.(raft.LoopbackTransport)
-		stores[i] = cluster.nodes[i].Peers
+		servers[i] = raft.Server{
+			ID:      raft.ServerID(strconv.Itoa(i)),
+			Address: transports[i].LocalAddr(),
+		}
 	}
 
 	for _, knob := range knobs {
 		knob.init(cluster)
 	}
 
+	configuration := raft.Configuration{}
 	if cluster.autoConnect {
 		connectLoobackTransports(transports)
-		populatePeerStores(stores, transports)
+		configuration.Servers = servers
+		bootstrapCluster(t, cluster.nodes, configuration)
+	} else {
+		configuration.Servers = servers[0:1]
+		nodes := map[int]*node{0: cluster.nodes[0]}
+		bootstrapCluster(t, nodes, configuration)
 	}
 
 	rafts := make([]*raft.Raft, n)
@@ -112,20 +121,22 @@ type cluster struct {
 	autoConnect bool          // Whether to automatically connect the transports
 }
 type node struct {
-	Config    *raft.Config
-	Logs      raft.LogStore
-	Stable    raft.StableStore
-	Snapshots raft.SnapshotStore
-	Peers     raft.PeerStore
-	Transport raft.Transport
+	Config        *raft.Config
+	Logs          raft.LogStore
+	Stable        raft.StableStore
+	Snapshots     raft.SnapshotStore
+	Configuration *raft.Configuration
+	Transport     raft.Transport
 }
 
 // Create default dependencies for a single raft node.
-func newNode(t *testing.T, addr string) *node {
-	_, transport := raft.NewInmemTransport(addr)
+func newNode(t *testing.T, i int) *node {
+	addr := strconv.Itoa(i)
+	_, transport := raft.NewInmemTransport(raft.ServerAddress(addr))
 
 	out := &testingWriter{t}
 	config := raft.DefaultConfig()
+	config.LocalID = raft.ServerID(addr)
 	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), 0)
 
 	// Decrease timeouts, since everything happens in-memory by
@@ -140,7 +151,6 @@ func newNode(t *testing.T, addr string) *node {
 		Logs:      raft.NewInmemStore(),
 		Stable:    raft.NewInmemStore(),
 		Snapshots: raft.NewDiscardSnapshotStore(),
-		Peers:     &raft.StaticPeers{},
 		Transport: transport,
 	}
 
@@ -156,7 +166,6 @@ func newRaft(fsm raft.FSM, node *node) (*raft.Raft, error) {
 		node.Logs,
 		node.Stable,
 		node.Snapshots,
-		node.Peers,
 		node.Transport,
 	)
 }
@@ -173,30 +182,18 @@ func connectLoobackTransports(transports []raft.LoopbackTransport) {
 	}
 }
 
-// Populate each node's peer store with the addresses of the other nodes.
-func populatePeerStores(stores []raft.PeerStore, transports []raft.LoopbackTransport) {
-	if len(stores) != len(transports) {
-		panic("peer stores and tranports length mismatch")
-	}
-
-	for i, store := range stores {
-		for j, transport := range transports {
-			if i == j {
-				continue
-			}
-
-			addrs, err := store.Peers()
-			if err != nil {
-				panic(fmt.Sprintf(
-					"failed to get peers for node %d: %v", i, err))
-			}
-
-			addrs = append(addrs, transport.LocalAddr())
-			if err := store.SetPeers(addrs); err != nil {
-				panic(fmt.Sprintf(
-					"failed to set peers for node %d: %v", i, err))
-			}
-
+func bootstrapCluster(t *testing.T, nodes map[int]*node, configuration raft.Configuration) {
+	for _, node := range nodes {
+		err := raft.BootstrapCluster(
+			node.Config,
+			node.Logs,
+			node.Stable,
+			node.Snapshots,
+			node.Transport,
+			configuration,
+		)
+		if err != nil {
+			t.Fatalf("failed to bootstrap cluster: %v", err)
 		}
 	}
 }
