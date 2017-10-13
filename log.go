@@ -1,6 +1,15 @@
 package rafttest
 
-import "testing"
+import (
+	"io"
+	"testing"
+)
+
+// TestingWriter returns an io.Writer that forwards the stream it receives to
+// the Logf function of the given testing instance.
+func TestingWriter(t *testing.T) io.Writer {
+	return &testingWriter{t: t}
+}
 
 // Implement io.Writer and forward what it receives to a
 // t.Testing logger.
