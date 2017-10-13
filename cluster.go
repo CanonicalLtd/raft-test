@@ -134,7 +134,7 @@ func newNode(t *testing.T, i int) *node {
 	addr := strconv.Itoa(i)
 	_, transport := raft.NewInmemTransport(raft.ServerAddress(addr))
 
-	out := &testingWriter{t}
+	out := TestingWriter(t)
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(addr)
 	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), 0)
