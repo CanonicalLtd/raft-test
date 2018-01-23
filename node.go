@@ -28,21 +28,15 @@ import (
 // Dependencies can be replaced or mutated using the various NodeOption knobs.
 func Node(t *testing.T, fsm raft.FSM, knobs ...Knob) *raft.Raft {
 	fsms := []raft.FSM{fsm}
-	knobs = append(knobs, &singleModeKnob{})
 
-	rafts, _ := Cluster(t, fsms, knobs...)
+	config := Config(func(i int, config *raft.Config) {
+		if i != 0 {
+			panic("expected to have a cluster with exactly one node")
+		}
+		config.StartAsLeader = true
+	})
+
+	rafts, _ := Cluster(t, fsms, config)
 
 	return rafts[0]
-}
-
-type singleModeKnob struct{}
-
-func (k *singleModeKnob) init(cluster *cluster) {
-	if len(cluster.nodes) != 1 {
-		panic("expected to have a cluster with exactly one node")
-	}
-	cluster.nodes[0].Config.StartAsLeader = true
-}
-
-func (k *singleModeKnob) cleanup(cluster *cluster) {
 }

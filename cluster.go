@@ -39,7 +39,7 @@ func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 	servers := make([]raft.Server, n)
 	transports := make([]raft.LoopbackTransport, n)
 	for i := 0; i < n; i++ {
-		cluster.nodes[i] = newNode(t, i)
+		cluster.nodes[i] = newDefaultNode(t, i)
 		transports[i] = cluster.nodes[i].Transport.(raft.LoopbackTransport)
 		servers[i] = raft.Server{
 			ID:      raft.ServerID(strconv.Itoa(i)),
@@ -120,6 +120,8 @@ type cluster struct {
 	nodes       map[int]*node // Options for node N.
 	autoConnect bool          // Whether to automatically connect the transports
 }
+
+// Hold dependencies for a single node.
 type node struct {
 	Config        *raft.Config
 	Logs          raft.LogStore
@@ -130,7 +132,7 @@ type node struct {
 }
 
 // Create default dependencies for a single raft node.
-func newNode(t *testing.T, i int) *node {
+func newDefaultNode(t *testing.T, i int) *node {
 	addr := strconv.Itoa(i)
 	_, transport := raft.NewInmemTransport(raft.ServerAddress(addr))
 
