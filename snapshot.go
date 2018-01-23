@@ -31,7 +31,7 @@ func FileSnapshots() *FileSnapshotsKnob {
 // FileSnapshotsKnob gives access to the FileSnapshotStore objects used by the
 // various nodes.
 type FileSnapshotsKnob struct {
-	t      *testing.T
+	t      testing.TB
 	dirs   []string
 	stores []*raft.FileSnapshotStore
 }

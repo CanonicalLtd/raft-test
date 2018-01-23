@@ -36,7 +36,12 @@ import (
 //
 // All the created nodes will part of the cluster and act as voting servers,
 // unless the Servers knob is used.
-func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
+func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	n := len(fsms)
 	cluster := &cluster{
 		t:     t,
@@ -93,7 +98,12 @@ type Knob interface {
 
 // Shutdown all the given raft nodes and fail the test if any of them errors
 // out while doing so.
-func Shutdown(t *testing.T, rafts []*raft.Raft) {
+func Shutdown(t testing.TB, rafts []*raft.Raft) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	futures := make([]raft.Future, len(rafts))
 	for i, r := range rafts {
 		futures[i] = r.Shutdown()
@@ -119,7 +129,7 @@ func Other(rafts []*raft.Raft, i int) int {
 }
 
 type cluster struct {
-	t     *testing.T
+	t     testing.TB
 	nodes map[int]*node // Options for node N.
 }
 
@@ -135,7 +145,7 @@ type node struct {
 }
 
 // Create default dependencies for a single raft node.
-func newDefaultNode(t *testing.T, i int) *node {
+func newDefaultNode(t testing.TB, i int) *node {
 	addr := strconv.Itoa(i)
 	_, transport := raft.NewInmemTransport(raft.ServerAddress(addr))
 
@@ -178,7 +188,12 @@ func newRaft(fsm raft.FSM, node *node) (*raft.Raft, error) {
 
 // Bootstrap the cluster, by connecting the appropriate nodes to each other and
 // setting up their initial configuration.
-func bootstrapCluster(t *testing.T, nodes map[int]*node) {
+func bootstrapCluster(t testing.TB, nodes map[int]*node) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	servers := make([]raft.Server, 0)
 	for i, node1 := range nodes {
 		if !node1.Bootstrap {
@@ -191,7 +206,7 @@ func bootstrapCluster(t *testing.T, nodes map[int]*node) {
 		servers = append(servers, server)
 
 		for _, node2 := range nodes {
-			if !node2.Bootstrap {
+			if node2 == node1 || !node2.Bootstrap {
 				continue
 			}
 			peers, ok := node1.Transport.(raft.WithPeers)

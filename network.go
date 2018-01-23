@@ -30,12 +30,19 @@ func Network() *NetworkKnob {
 
 // NetworkKnob can connect and disconnect nodes via loopback transports.
 type NetworkKnob struct {
-	t          *testing.T
+	t          testing.TB
 	transports []raft.LoopbackTransport
 }
 
 // Disconnect the network transport of the raft node with the given index.
 func (k *NetworkKnob) Disconnect(i int) {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	k.t.Logf("disconnecting node %di", i)
+
 	n := len(k.transports)
 	if i < 0 || i >= n {
 		k.t.Fatalf("invalid index %d (%d nodes available)", i, n)
@@ -52,6 +59,13 @@ func (k *NetworkKnob) Disconnect(i int) {
 
 // Reconnect the network transport of the raft node with the given index.
 func (k *NetworkKnob) Reconnect(i int) {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	k.t.Logf("reconnecting node %di", i)
+
 	n := len(k.transports)
 	if i < 0 || i >= n {
 		k.t.Fatalf("invalid index %d (%d nodes available)", i, n)

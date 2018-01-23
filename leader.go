@@ -25,9 +25,15 @@ import (
 // could possibly be the instance itself).
 //
 // It fails the test if this doesn't happen within the specified timeout.
-func WaitLeader(t *testing.T, raft *raft.Raft, timeout time.Duration) {
+func WaitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	for timeout > 0 {
 		if raft.Leader() != "" {
+			t.Log("leadership acquired")
 			return
 		}
 		pause := 25 * time.Millisecond

@@ -31,7 +31,7 @@ func Notify() *NotifyKnob {
 // NotifyKnob can be used for receiving leadershipChange notifications
 // whenever the leadership status of a node in the cluster changes.
 type NotifyKnob struct {
-	t         *testing.T
+	t         testing.TB
 	ch        chan leadershipChange
 	notifyChs []chan bool
 }
@@ -45,6 +45,11 @@ type NotifyKnob struct {
 // It fails the test if no matching leadershipChange is received within the
 // timeout.
 func (k *NotifyKnob) NextAcquired(timeout time.Duration) int {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	return k.nextMatching(timeout, true)
 }
 
@@ -57,18 +62,36 @@ func (k *NotifyKnob) NextAcquired(timeout time.Duration) int {
 // It fails the test if no matching leadershipChange is received within the
 // timeout.
 func (k *NotifyKnob) NextLost(timeout time.Duration) int {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	return k.nextMatching(timeout, false)
 }
 
 // Return the next leadershipChange received matching 'acquired'.
 func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	for {
 		start := time.Now()
 		info := k.next(timeout)
-		if info.Acquired == acquired {
-			return info.On
+		if info.Acquired != acquired {
+			timeout -= time.Since(start)
+			continue
 		}
-		timeout -= time.Since(start)
+		verb := ""
+		if acquired {
+			verb = "acquired"
+		} else {
+			verb = "lost"
+		}
+		k.t.Logf("node %d %s leadership", info.On, verb)
+		return info.On
 	}
 }
 
