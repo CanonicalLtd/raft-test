@@ -67,3 +67,29 @@ func TestNotify_Shutdown(t *testing.T) {
 		assert.NoError(t, rafts[n].Shutdown().Error())
 	}
 }
+
+func TestWaitLeader(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3))
+	defer cleanup()
+	rafttest.WaitLeader(t, rafts[0], time.Second)
+	assert.NotEqual(t, "", rafts[0].Leader())
+}
+
+func TestWaitLeader_Timeout(t *testing.T) {
+	// A node with a single node won't be able to perform an election.
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
+	defer cleanup()
+
+	succeeded := false
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		rafttest.WaitLeader(&testing.T{}, rafts[0], time.Microsecond)
+		succeeded = true
+	}()
+	wg.Wait()
+
+	assert.False(t, succeeded)
+}

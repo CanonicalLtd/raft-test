@@ -15,9 +15,13 @@
 package rafttest_test
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/CanonicalLtd/raft-test"
+	"github.com/hashicorp/raft"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFSM_Restore(t *testing.T) {
@@ -25,4 +29,81 @@ func TestFSM_Restore(t *testing.T) {
 	if err := fsm.Restore(nil); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestFSMWatcher_WaitIndex(t *testing.T) {
+	fsms := rafttest.FSMs(2)
+	watcher := rafttest.FSMWatcher(t, fsms)
+
+	go func() {
+		fsms[0].Apply(&raft.Log{Index: 1})
+		fsms[0].Apply(&raft.Log{Index: 2})
+	}()
+
+	go func() {
+		fsms[1].Apply(&raft.Log{Index: 1})
+		fsms[1].Apply(&raft.Log{Index: 2})
+		fsms[1].Apply(&raft.Log{Index: 3})
+	}()
+
+	watcher.WaitIndex(0, 2, time.Second)
+	watcher.WaitIndex(1, 3, time.Second)
+}
+
+func TestFSMWatcher_WaitIndexTimeout(t *testing.T) {
+	fsms := rafttest.FSMs(2)
+
+	testingT := &testing.T{}
+	watcher := rafttest.FSMWatcher(testingT, fsms)
+
+	succeeded := false
+
+	fsms[0].Apply(&raft.Log{Index: 1})
+	fsms[0].Apply(&raft.Log{Index: 2})
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		watcher.WaitIndex(0, 3, time.Microsecond)
+		succeeded = true
+	}()
+
+	wg.Wait()
+
+	assert.False(t, succeeded)
+}
+
+func TestFSMWatcher_WaitSnapshot(t *testing.T) {
+	fsms := rafttest.FSMs(2)
+	watcher := rafttest.FSMWatcher(t, fsms)
+
+	go func() {
+		fsms[0].Snapshot()
+	}()
+
+	go func() {
+		fsms[1].Snapshot()
+		fsms[1].Snapshot()
+	}()
+
+	watcher.WaitSnapshot(0, 1, time.Second)
+	watcher.WaitSnapshot(1, 2, time.Second)
+}
+
+func TestFSMWatcher_WaitRestore(t *testing.T) {
+	fsms := rafttest.FSMs(2)
+	watcher := rafttest.FSMWatcher(t, fsms)
+
+	go func() {
+		fsms[0].Restore(nil)
+	}()
+
+	go func() {
+		fsms[1].Restore(nil)
+		fsms[1].Restore(nil)
+	}()
+
+	watcher.WaitRestore(0, 1, time.Second)
+	watcher.WaitRestore(1, 2, time.Second)
 }

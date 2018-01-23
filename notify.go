@@ -18,6 +18,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/raft"
 )
 
 // Notify exposes APIs to block until a node of the cluster acquires or loses
@@ -34,6 +36,7 @@ type NotifyKnob struct {
 	t         testing.TB
 	ch        chan leadershipChange
 	notifyChs []chan bool
+	rafts     []*raft.Raft
 }
 
 // NextAcquired blocks until this channel receives a leadershipChange object whose
@@ -87,6 +90,7 @@ func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 		verb := ""
 		if acquired {
 			verb = "acquired"
+			waitLeader(k.t, k.rafts[info.On], timeout)
 		} else {
 			verb = "lost"
 		}
@@ -95,7 +99,7 @@ func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 	}
 }
 
-func (k *NotifyKnob) init(cluster *cluster) {
+func (k *NotifyKnob) pre(cluster *cluster) {
 	k.t = cluster.t
 
 	// Use a large pool, so raft won't block on us and tests can proceed
@@ -110,11 +114,20 @@ func (k *NotifyKnob) init(cluster *cluster) {
 	go k.watch()
 }
 
+func (k *NotifyKnob) post(rafts []*raft.Raft) {
+	k.rafts = rafts
+}
+
 // Block until there's a leadership change in any node of the cluster, and then
 // returns a leadershipChange object with the relevant information.
 //
 // It fails the test if no leadershipChange is received within the given timeout.
 func (k *NotifyKnob) next(timeout time.Duration) (info leadershipChange) {
+	helper, ok := k.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
 	select {
 	case info = <-k.ch:
 		return
@@ -153,4 +166,20 @@ func (k *NotifyKnob) watch() {
 type leadershipChange struct {
 	On       int  // The index of the node whose leadership status changed.
 	Acquired bool // Whether the leadership was acquired or lost.
+}
+
+// WaitLeader blocks until the given raft instance sets a leader (which
+// could possibly be the instance itself).
+//
+// It fails the test if this doesn't happen within the specified timeout.
+func waitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	check := func() bool {
+		return raft.Leader() != ""
+	}
+	wait(t, check, 25*time.Millisecond, timeout, "no leader was set")
 }
