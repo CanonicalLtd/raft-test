@@ -39,6 +39,3 @@ func (k *transportKnob) init(cluster *cluster) {
 		node.Transport = k.factory(i)
 	}
 }
-
-func (k *transportKnob) cleanup(cluster *cluster) {
-}

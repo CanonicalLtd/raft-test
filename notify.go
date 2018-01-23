@@ -124,12 +124,6 @@ func (k *NotifyKnob) next(timeout time.Duration) (info leadershipChange) {
 	}
 }
 
-func (k *NotifyKnob) cleanup(cluster *cluster) {
-	for _, notifyCh := range k.notifyChs {
-		close(notifyCh)
-	}
-}
-
 func (k *NotifyKnob) watch() {
 	n := len(k.notifyChs)
 	cases := make([]reflect.SelectCase, n)

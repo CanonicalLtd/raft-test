@@ -16,7 +16,6 @@ package rafttest
 
 import (
 	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/hashicorp/raft"
@@ -53,13 +52,5 @@ func (k *FileSnapshotsKnob) init(cluster *cluster) {
 		node.Snapshots = store
 		k.dirs[i] = dir
 		k.stores[i] = store
-	}
-}
-
-func (k *FileSnapshotsKnob) cleanup(cluster *cluster) {
-	for _, dir := range k.dirs {
-		if err := os.RemoveAll(dir); err != nil {
-			k.t.Fatalf("failed to cleanup snapshot dir: %v", err)
-		}
 	}
 }

@@ -81,9 +81,6 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 
 	cleanup := func() {
 		Shutdown(t, rafts)
-		for _, knob := range knobs {
-			knob.cleanup(cluster)
-		}
 	}
 
 	return rafts, cleanup
@@ -93,7 +90,6 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 // Cluster() or Node().
 type Knob interface {
 	init(*cluster)
-	cleanup(*cluster)
 }
 
 // Shutdown all the given raft nodes and fail the test if any of them errors

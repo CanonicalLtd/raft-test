@@ -91,6 +91,3 @@ func (k *NetworkKnob) init(cluster *cluster) {
 		k.transports[i] = loopback
 	}
 }
-
-func (k *NetworkKnob) cleanup(cluster *cluster) {
-}

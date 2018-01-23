@@ -33,6 +33,3 @@ func (k *configKnob) init(cluster *cluster) {
 		k.f(i, node.Config)
 	}
 }
-
-func (k *configKnob) cleanup(cluster *cluster) {
-}

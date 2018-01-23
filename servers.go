@@ -36,6 +36,3 @@ func (k *serversKnob) init(cluster *cluster) {
 		cluster.nodes[index].Bootstrap = true
 	}
 }
-
-func (k *serversKnob) cleanup(cluster *cluster) {
-}
