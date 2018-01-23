@@ -24,67 +24,47 @@ import (
 // leadership.
 func Notify() *NotifyKnob {
 	return &NotifyKnob{
-		ch: make(chan LeadershipChange),
+		ch: make(chan leadershipChange),
 	}
 }
 
-// NotifyKnob can be used for receiving LeadershipChange notifications
+// NotifyKnob can be used for receiving leadershipChange notifications
 // whenever the leadership status of a node in the cluster changes.
 type NotifyKnob struct {
 	t         *testing.T
-	ch        chan LeadershipChange
+	ch        chan leadershipChange
 	notifyChs []chan bool
 }
 
-// LeadershipChange includes information about a leadership change in a node.
-type LeadershipChange struct {
-	On       int  // The index of the node whose leadership status changed.
-	Acquired bool // Whether the leadership was acquired or lost.
-}
-
-// Next blocks until there's a leadership change in any node of the cluster,
-// and then returns a LeadershipChange object with the relevant information.
-//
-// It fails the test if no LeadershipChange is received within the given timeout.
-func (k *NotifyKnob) Next(timeout time.Duration) (info LeadershipChange) {
-	select {
-	case info = <-k.ch:
-		return
-	case <-time.After(timeout):
-		k.t.Fatalf("no notification received within %s", timeout)
-		return
-	}
-}
-
-// NextAcquired blocks until this channel receives a LeadershipChange object whose
+// NextAcquired blocks until this channel receives a leadershipChange object whose
 // Acquired attribute is true, and then returns its Node attribute.
 //
-// All LeadershipChange objects received whose Acquired attribute is set to
+// All leadershipChange objects received whose Acquired attribute is set to
 // false will be discarded.
 //
-// It fails the test if no matching LeadershipChange is received within the
+// It fails the test if no matching leadershipChange is received within the
 // timeout.
 func (k *NotifyKnob) NextAcquired(timeout time.Duration) int {
 	return k.nextMatching(timeout, true)
 }
 
-// NextLost blocks until this channel receives a LeadershipChange object whose
+// NextLost blocks until this channel receives a leadershipChange object whose
 // Acquired attribute is false, and then returns its Node attribute.
 //
-// All LeadershipChange objects received whose Acquired attribute is set to
+// All leadershipChange objects received whose Acquired attribute is set to
 // true will be discarded.
 //
-// It fails the test if no matching LeadershipChange is received within the
+// It fails the test if no matching leadershipChange is received within the
 // timeout.
 func (k *NotifyKnob) NextLost(timeout time.Duration) int {
 	return k.nextMatching(timeout, false)
 }
 
-// Return the next LeadershipChange received matching 'acquired'.
+// Return the next leadershipChange received matching 'acquired'.
 func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 	for {
 		start := time.Now()
-		info := k.Next(timeout)
+		info := k.next(timeout)
 		if info.Acquired == acquired {
 			return info.On
 		}
@@ -105,6 +85,20 @@ func (k *NotifyKnob) init(cluster *cluster) {
 		k.notifyChs[i] = notifyCh
 	}
 	go k.watch()
+}
+
+// Block until there's a leadership change in any node of the cluster, and then
+// returns a leadershipChange object with the relevant information.
+//
+// It fails the test if no leadershipChange is received within the given timeout.
+func (k *NotifyKnob) next(timeout time.Duration) (info leadershipChange) {
+	select {
+	case info = <-k.ch:
+		return
+	case <-time.After(timeout):
+		k.t.Fatalf("no notification received within %s", timeout)
+		return
+	}
 }
 
 func (k *NotifyKnob) cleanup(cluster *cluster) {
@@ -134,6 +128,12 @@ func (k *NotifyKnob) watch() {
 			// means the node was shutdown.
 			cases = append(cases[:i], cases[i+1:]...)
 		}
-		k.ch <- LeadershipChange{On: i, Acquired: value.Bool()}
+		k.ch <- leadershipChange{On: i, Acquired: value.Bool()}
 	}
+}
+
+// leadershipChange includes information about a leadership change in a node.
+type leadershipChange struct {
+	On       int  // The index of the node whose leadership status changed.
+	Acquired bool // Whether the leadership was acquired or lost.
 }

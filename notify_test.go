@@ -20,45 +20,8 @@ import (
 	"time"
 
 	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
 )
-
-// The Notify knob can be used to receive a notification whenever the
-// leadership status of a node changes.
-func TestNotify(t *testing.T) {
-	notify := rafttest.Notify()
-
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
-	defer cleanup()
-
-	change := notify.Next(time.Second)
-	assert.Contains(t, []int{0, 1, 2}, change.On)
-	assert.True(t, change.Acquired)
-	assert.Equal(t, raft.Leader, rafts[change.On].State())
-}
-
-// The test associated with the given testing.T object fails if a notification
-// is not received within the given timeout.
-func TestNotify_NextTimeout(t *testing.T) {
-	notify := rafttest.Notify()
-
-	_, cleanup := rafttest.Cluster(&testing.T{}, rafttest.FSMs(3), notify)
-	defer cleanup()
-
-	succeeded := false
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		notify.Next(time.Microsecond)
-		succeeded = true
-	}()
-	wg.Wait()
-
-	assert.False(t, succeeded)
-}
 
 func TestNotify_NextAcquired(t *testing.T) {
 	notify := rafttest.Notify()
