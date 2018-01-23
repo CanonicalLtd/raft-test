@@ -38,17 +38,29 @@ func NoAutoConnect() NetworkOption {
 	}
 }
 
-// TransportFactory can be used to create custom transports.
+// Transport can be used to create custom transports.
 //
 // The given function takes a node index as argument and returns the Transport
 // that the node should use.
 //
 // If the transports returned by the factory do not implement
 // LoopbackTransport, the Disconnect API won't work.
-func TransportFactory(factory func(int) raft.Transport) NetworkOption {
-	return func(k *NetworkKnob) {
-		k.transportFactory = factory
+func Transport(factory func(int) raft.Transport) Knob {
+	return &transportKnob{factory: factory}
+}
+
+// transportKnob return a custom transport for a node.
+type transportKnob struct {
+	factory func(int) raft.Transport
+}
+
+func (k *transportKnob) init(cluster *cluster) {
+	for i, node := range cluster.nodes {
+		node.Transport = k.factory(i)
 	}
+}
+
+func (k *transportKnob) cleanup(cluster *cluster) {
 }
 
 // NetworkOption configures the behavior of a NetworkKnob.

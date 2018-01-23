@@ -23,8 +23,7 @@ func Config(f func(int, *raft.Config)) Knob {
 	}
 }
 
-// configKnob gives access to the FileSnapshotStore objects used by the
-// various nodes.
+// configKnob gives access to the Config objects used by the various nodes.
 type configKnob struct {
 	f func(int, *raft.Config)
 }
