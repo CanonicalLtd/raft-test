@@ -26,41 +26,44 @@ import (
 
 // Cluster creates n raft nodes, one for each of the given FSMs.
 //
-// Each raft.Raft instance is created with sane test-oriented dependencies,
-// such as in-memory transports and very low timeouts.
+// Each raft.Raft instance is created with sane test-oriented default
+// dependencies, which include:
+//
+// - very low configuration timeouts
+// - in-memory transports which are automatically connected to each other
+// - in-memory log stores
+// - in-memory snapshot stores
+//
+// All the created nodes will part of the cluster and act as voting servers,
+// unless the Servers knob is used.
 func Cluster(t *testing.T, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
 	n := len(fsms)
 	cluster := &cluster{
-		t:           t,
-		nodes:       make(map[int]*node, n),
-		autoConnect: true,
+		t:     t,
+		nodes: make(map[int]*node, n),
 	}
 
-	servers := make([]raft.Server, n)
-	transports := make([]raft.LoopbackTransport, n)
 	for i := 0; i < n; i++ {
 		cluster.nodes[i] = newDefaultNode(t, i)
-		transports[i] = cluster.nodes[i].Transport.(raft.LoopbackTransport)
-		servers[i] = raft.Server{
-			ID:      raft.ServerID(strconv.Itoa(i)),
-			Address: transports[i].LocalAddr(),
-		}
 	}
 
 	for _, knob := range knobs {
 		knob.init(cluster)
 	}
 
-	configuration := raft.Configuration{}
-	if cluster.autoConnect {
-		connectLoobackTransports(transports)
-		configuration.Servers = servers
-		bootstrapCluster(t, cluster.nodes, configuration)
-	} else {
-		configuration.Servers = servers[0:1]
-		nodes := map[int]*node{0: cluster.nodes[0]}
-		bootstrapCluster(t, nodes, configuration)
+	servers := make([]raft.Server, 0)
+	for i, node := range cluster.nodes {
+		if !node.Bootstrap {
+			continue
+		}
+		server := raft.Server{
+			ID:      raft.ServerID(strconv.Itoa(i)),
+			Address: node.Transport.LocalAddr(),
+		}
+		servers = append(servers, server)
 	}
+
+	bootstrapCluster(t, cluster.nodes)
 
 	rafts := make([]*raft.Raft, n)
 	for i := range fsms {
@@ -116,9 +119,8 @@ func Other(rafts []*raft.Raft, i int) int {
 }
 
 type cluster struct {
-	t           *testing.T
-	nodes       map[int]*node // Options for node N.
-	autoConnect bool          // Whether to automatically connect the transports
+	t     *testing.T
+	nodes map[int]*node // Options for node N.
 }
 
 // Hold dependencies for a single node.
@@ -129,6 +131,7 @@ type node struct {
 	Snapshots     raft.SnapshotStore
 	Configuration *raft.Configuration
 	Transport     raft.Transport
+	Bootstrap     bool // Whether to bootstrap the node, making it join the cluster
 }
 
 // Create default dependencies for a single raft node.
@@ -154,6 +157,7 @@ func newDefaultNode(t *testing.T, i int) *node {
 		Stable:    raft.NewInmemStore(),
 		Snapshots: raft.NewDiscardSnapshotStore(),
 		Transport: transport,
+		Bootstrap: true,
 	}
 
 	return options
@@ -172,20 +176,39 @@ func newRaft(fsm raft.FSM, node *node) (*raft.Raft, error) {
 	)
 }
 
-// Connect all the given loopback transports to each other.
-func connectLoobackTransports(transports []raft.LoopbackTransport) {
-	for i, transport1 := range transports {
-		for j, transport2 := range transports {
-			if i != j {
-				transport1.Connect(transport2.LocalAddr(), transport2)
-				transport2.Connect(transport1.LocalAddr(), transport1)
+// Bootstrap the cluster, by connecting the appropriate nodes to each other and
+// setting up their initial configuration.
+func bootstrapCluster(t *testing.T, nodes map[int]*node) {
+	servers := make([]raft.Server, 0)
+	for i, node1 := range nodes {
+		if !node1.Bootstrap {
+			continue
+		}
+		server := raft.Server{
+			ID:      raft.ServerID(strconv.Itoa(i)),
+			Address: node1.Transport.LocalAddr(),
+		}
+		servers = append(servers, server)
+
+		for _, node2 := range nodes {
+			if !node2.Bootstrap {
+				continue
 			}
+			peers, ok := node1.Transport.(raft.WithPeers)
+			if !ok {
+				t.Fatalf("transport of node %d does not implement WithPeers", i)
+			}
+			peers.Connect(node2.Transport.LocalAddr(), node2.Transport)
 		}
 	}
-}
 
-func bootstrapCluster(t *testing.T, nodes map[int]*node, configuration raft.Configuration) {
+	configuration := raft.Configuration{}
+	configuration.Servers = servers
+
 	for _, node := range nodes {
+		if !node.Bootstrap {
+			continue
+		}
 		err := raft.BootstrapCluster(
 			node.Config,
 			node.Logs,

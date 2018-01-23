@@ -12,31 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rafttest
+package rafttest_test
 
 import (
 	"testing"
+	"time"
 
+	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// Node is a convenience for creating a Cluster with a single raft.Raft node
-// with single mode enabled and that immediately starts as leader.
-//
-// The default network address of a test node is "0".
-//
-// Dependencies can be replaced or mutated using the various NodeOption knobs.
-func Node(t *testing.T, fsm raft.FSM, knobs ...Knob) *raft.Raft {
-	fsms := []raft.FSM{fsm}
+// If the Servers knob is used, only the given nodes are connected and
+// bootstrapped.
+func TestServers(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Servers(0))
+	defer cleanup()
 
-	config := Config(func(i int, config *raft.Config) {
-		if i != 0 {
-			t.Fatal("expected to have a cluster with exactly one node")
-		}
-		config.StartAsLeader = true
-	})
-
-	rafts, _ := Cluster(t, fsms, config)
-
-	return rafts[0]
+	rafttest.WaitLeader(t, rafts[0], time.Second)
+	assert.Equal(t, raft.Leader, rafts[0].State())
+	future := rafts[0].GetConfiguration()
+	require.NoError(t, future.Error())
+	assert.Len(t, future.Configuration().Servers, 1)
 }

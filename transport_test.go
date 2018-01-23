@@ -39,16 +39,6 @@ func TestNetwork_Disconnect(t *testing.T) {
 	assert.False(t, rafts[i].State() == raft.Leader)
 }
 
-// If NoAutoConnect is passed, the network does not get automatically connected.
-func TestNetwork_NoAutoConnect(t *testing.T) {
-	network := rafttest.Network(rafttest.NoAutoConnect())
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), network)
-	defer cleanup()
-
-	rafttest.WaitLeader(t, rafts[0], time.Second)
-	assert.Equal(t, raft.Leader, rafts[0].State())
-}
-
 func TestNetwork_DisconnectInvalidIndex(t *testing.T) {
 	network := rafttest.Network()
 	_, cleanup := rafttest.Cluster(&testing.T{}, rafttest.FSMs(3), network)
