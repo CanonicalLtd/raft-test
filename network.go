@@ -41,7 +41,7 @@ func (k *NetworkKnob) Disconnect(i int) {
 		helper.Helper()
 	}
 
-	k.t.Logf("disconnecting node %di", i)
+	k.t.Logf("disconnecting node %d", i)
 
 	n := len(k.transports)
 	if i < 0 || i >= n {
@@ -64,7 +64,7 @@ func (k *NetworkKnob) Reconnect(i int) {
 		helper.Helper()
 	}
 
-	k.t.Logf("reconnecting node %di", i)
+	k.t.Logf("reconnecting node %d", i)
 
 	n := len(k.transports)
 	if i < 0 || i >= n {
@@ -80,7 +80,7 @@ func (k *NetworkKnob) Reconnect(i int) {
 	}
 }
 
-func (k *NetworkKnob) init(cluster *cluster) {
+func (k *NetworkKnob) pre(cluster *cluster) {
 	k.t = cluster.t
 	k.transports = make([]raft.LoopbackTransport, len(cluster.nodes))
 	for i, node := range cluster.nodes {
@@ -90,4 +90,7 @@ func (k *NetworkKnob) init(cluster *cluster) {
 		}
 		k.transports[i] = loopback
 	}
+}
+
+func (k *NetworkKnob) post([]*raft.Raft) {
 }

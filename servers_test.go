@@ -27,10 +27,14 @@ import (
 // If the Servers knob is used, only the given nodes are connected and
 // bootstrapped.
 func TestServers(t *testing.T) {
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Servers(0))
+	fsms := rafttest.FSMs(3)
+	servers := rafttest.Servers(0)
+	notify := rafttest.Notify()
+	rafts, cleanup := rafttest.Cluster(t, fsms, servers, notify)
 	defer cleanup()
 
-	rafttest.WaitLeader(t, rafts[0], time.Second)
+	assert.Equal(t, 0, notify.NextAcquired(time.Second))
+
 	assert.Equal(t, raft.Leader, rafts[0].State())
 	future := rafts[0].GetConfiguration()
 	require.NoError(t, future.Error())

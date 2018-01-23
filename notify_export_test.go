@@ -14,25 +14,4 @@
 
 package rafttest
 
-import "github.com/hashicorp/raft"
-
-// Config sets a hook for tweaking the raft configuration of individual nodes.
-func Config(f func(int, *raft.Config)) Knob {
-	return &configKnob{
-		f: f,
-	}
-}
-
-// configKnob gives access to the Config objects used by the various nodes.
-type configKnob struct {
-	f func(int, *raft.Config)
-}
-
-func (k *configKnob) pre(cluster *cluster) {
-	for i, node := range cluster.nodes {
-		k.f(i, node.Config)
-	}
-}
-
-func (k *configKnob) post([]*raft.Raft) {
-}
+var WaitLeader = waitLeader

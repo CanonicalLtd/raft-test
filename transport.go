@@ -34,8 +34,11 @@ type transportKnob struct {
 	factory func(int) raft.Transport
 }
 
-func (k *transportKnob) init(cluster *cluster) {
+func (k *transportKnob) pre(cluster *cluster) {
 	for i, node := range cluster.nodes {
 		node.Transport = k.factory(i)
 	}
+}
+
+func (k *transportKnob) post([]*raft.Raft) {
 }

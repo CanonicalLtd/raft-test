@@ -14,6 +14,8 @@
 
 package rafttest
 
+import "github.com/hashicorp/raft"
+
 // Servers can be used to indicate which nodes should be initially part of the
 // created cluster.
 //
@@ -28,11 +30,14 @@ type serversKnob struct {
 	indexes []int
 }
 
-func (k *serversKnob) init(cluster *cluster) {
+func (k *serversKnob) pre(cluster *cluster) {
 	for _, node := range cluster.nodes {
 		node.Bootstrap = false
 	}
 	for _, index := range k.indexes {
 		cluster.nodes[index].Bootstrap = true
 	}
+}
+
+func (k *serversKnob) post([]*raft.Raft) {
 }

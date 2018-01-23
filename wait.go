@@ -17,28 +17,26 @@ package rafttest
 import (
 	"testing"
 	"time"
-
-	"github.com/hashicorp/raft"
 )
 
-// WaitLeader blocks until the given raft instance sets a leader (which
-// could possibly be the instance itself).
-//
-// It fails the test if this doesn't happen within the specified timeout.
-func WaitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
+// Poll the given function at the given internval, until it returns true, or
+// the timeout expires.
+func wait(t testing.TB, f func() bool, interval, timeout time.Duration, message string) {
 	helper, ok := t.(testingHelper)
 	if ok {
 		helper.Helper()
 	}
 
-	for timeout > 0 {
-		if raft.Leader() != "" {
-			t.Log("leadership acquired")
+	timer := time.After(timeout)
+	for {
+		select {
+		case <-timer:
+			t.Fatalf("%s within %s", message, timeout)
+		default:
+		}
+		if f() {
 			return
 		}
-		pause := 25 * time.Millisecond
-		time.Sleep(pause)
-		timeout -= pause
+		time.Sleep(interval)
 	}
-	t.Fatalf("no leader was set within %s", timeout)
 }

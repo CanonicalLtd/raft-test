@@ -20,19 +20,36 @@ import (
 	"time"
 
 	"github.com/CanonicalLtd/raft-test"
+	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestWaitLeader(t *testing.T) {
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3))
+func TestNetwork_Disconnect(t *testing.T) {
+	notify := rafttest.Notify()
+	network := rafttest.Network()
+	fsms := rafttest.FSMs(3)
+	watcher := rafttest.FSMWatcher(t, fsms)
+	rafts, cleanup := rafttest.Cluster(t, fsms, notify, network)
 	defer cleanup()
-	rafttest.WaitLeader(t, rafts[0], time.Second)
-	assert.NotEqual(t, "", rafts[0].Leader())
+
+	i := notify.NextAcquired(time.Second)
+
+	rafts[i].Apply(nil, time.Second)
+	for i := range fsms {
+		watcher.WaitIndex(i, 2, time.Second)
+	}
+
+	network.Disconnect(i)
+
+	j := notify.NextLost(time.Second)
+
+	assert.True(t, i == j)
+	assert.False(t, rafts[i].State() == raft.Leader)
 }
 
-func TestWaitLeader_Timeout(t *testing.T) {
-	// A node with a single node won't be able to perform an election.
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
+func TestNetwork_DisconnectInvalidIndex(t *testing.T) {
+	network := rafttest.Network()
+	_, cleanup := rafttest.Cluster(&testing.T{}, rafttest.FSMs(3), network)
 	defer cleanup()
 
 	succeeded := false
@@ -41,7 +58,7 @@ func TestWaitLeader_Timeout(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		rafttest.WaitLeader(&testing.T{}, rafts[0], time.Microsecond)
+		network.Disconnect(1000)
 		succeeded = true
 	}()
 	wg.Wait()

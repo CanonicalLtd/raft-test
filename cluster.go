@@ -53,19 +53,7 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 	}
 
 	for _, knob := range knobs {
-		knob.init(cluster)
-	}
-
-	servers := make([]raft.Server, 0)
-	for i, node := range cluster.nodes {
-		if !node.Bootstrap {
-			continue
-		}
-		server := raft.Server{
-			ID:      raft.ServerID(strconv.Itoa(i)),
-			Address: node.Transport.LocalAddr(),
-		}
-		servers = append(servers, server)
+		knob.pre(cluster)
 	}
 
 	bootstrapCluster(t, cluster.nodes)
@@ -79,6 +67,10 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 		rafts[i] = raft
 	}
 
+	for _, knob := range knobs {
+		knob.post(rafts)
+	}
+
 	cleanup := func() {
 		Shutdown(t, rafts)
 	}
@@ -89,7 +81,8 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()
 // Knob can be used to tweak the dependencies of test Raft nodes created with
 // Cluster() or Node().
 type Knob interface {
-	init(*cluster)
+	pre(*cluster)
+	post([]*raft.Raft)
 }
 
 // Shutdown all the given raft nodes and fail the test if any of them errors
@@ -148,7 +141,7 @@ func newDefaultNode(t testing.TB, i int) *node {
 	out := TestingWriter(t)
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(addr)
-	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), 0)
+	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), log.Ltime|log.Lmicroseconds)
 
 	// Decrease timeouts, since everything happens in-memory by
 	// default.
@@ -161,7 +154,7 @@ func newDefaultNode(t testing.TB, i int) *node {
 		Config:    config,
 		Logs:      raft.NewInmemStore(),
 		Stable:    raft.NewInmemStore(),
-		Snapshots: raft.NewDiscardSnapshotStore(),
+		Snapshots: raft.NewInmemSnapshotStore(),
 		Transport: transport,
 		Bootstrap: true,
 	}
