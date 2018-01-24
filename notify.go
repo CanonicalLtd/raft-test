@@ -90,7 +90,7 @@ func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 		verb := ""
 		if acquired {
 			verb = "acquired"
-			waitLeader(k.t, k.rafts[info.On], timeout)
+			WaitLeader(k.t, k.rafts[info.On], timeout)
 		} else {
 			verb = "lost"
 		}
@@ -166,20 +166,4 @@ func (k *NotifyKnob) watch() {
 type leadershipChange struct {
 	On       int  // The index of the node whose leadership status changed.
 	Acquired bool // Whether the leadership was acquired or lost.
-}
-
-// WaitLeader blocks until the given raft instance sets a leader (which
-// could possibly be the instance itself).
-//
-// It fails the test if this doesn't happen within the specified timeout.
-func waitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	check := func() bool {
-		return raft.Leader() != ""
-	}
-	wait(t, check, 25*time.Millisecond, timeout, "no leader was set")
 }

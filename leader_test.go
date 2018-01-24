@@ -23,22 +23,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNotify_NextAcquired(t *testing.T) {
-	notify := rafttest.Notify()
-
-	_, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
+func TestWaitLeader(t *testing.T) {
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3))
 	defer cleanup()
-
-	i := notify.NextAcquired(time.Second)
-	assert.Contains(t, []int{0, 1, 2}, i)
+	rafttest.WaitLeader(t, rafts[0], time.Second)
+	assert.NotEqual(t, "", rafts[0].Leader())
 }
 
-// The test associated with the given testing.T object fails if a notification
-// is not received within the given timeout.
-func TestNotify_NextAcquiredTimeout(t *testing.T) {
-	notify := rafttest.Notify()
-
-	_, cleanup := rafttest.Cluster(&testing.T{}, rafttest.FSMs(3), notify)
+func TestWaitLeader_Timeout(t *testing.T) {
+	// A node with a single node won't be able to perform an election.
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
 	defer cleanup()
 
 	succeeded := false
@@ -47,23 +41,10 @@ func TestNotify_NextAcquiredTimeout(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		notify.NextAcquired(time.Microsecond)
+		rafttest.WaitLeader(&testing.T{}, rafts[0], time.Microsecond)
 		succeeded = true
 	}()
 	wg.Wait()
 
 	assert.False(t, succeeded)
-}
-
-// If a node is shutdown, no more notification gets received from it
-func TestNotify_Shutdown(t *testing.T) {
-	notify := rafttest.Notify()
-
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
-	defer cleanup()
-
-	for i := 0; i < 2; i++ {
-		n := notify.NextAcquired(time.Second)
-		assert.NoError(t, rafts[n].Shutdown().Error())
-	}
 }
