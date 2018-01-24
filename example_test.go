@@ -72,7 +72,7 @@ func Example() {
 	// Get the index of the other two follower raft instance.
 	k := rafttest.Other(rafts, i, j)
 
-	// Keep track of the last snapshot performed on instance i and j.
+	// Keep track of the last snapshot performed on instance i and k.
 	snapshotI := watcher.LastSnapshot(i)
 	snapshotK := watcher.LastSnapshot(k)
 

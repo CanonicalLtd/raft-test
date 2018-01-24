@@ -94,7 +94,7 @@ func (w *FSMWatcherAPI) WaitIndex(i int, index uint64, timeout time.Duration) {
 		return wrapper.index >= index
 	}
 
-	message := fmt.Sprintf("fsm %d did not reach index %d", i, index)
+	message := fmt.Sprintf("fsm %d did not reach index %d (last is %d)", i, index, wrapper.index)
 	wait(w.t, check, 25*time.Millisecond, timeout, message)
 }
 
@@ -130,6 +130,7 @@ func (w *FSMWatcherAPI) WaitRestore(i int, n uint64, timeout time.Duration) {
 		helper.Helper()
 	}
 
+	w.t.Logf("%d: fsm: wait for restore %d", i, n)
 	wrapper := w.wrappers[i]
 	check := func() bool {
 		wrapper.mu.Lock()
