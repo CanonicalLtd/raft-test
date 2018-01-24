@@ -74,7 +74,10 @@ func (k *NetworkKnob) Reconnect(i int) {
 	if this == nil {
 		k.t.Fatalf("node %d's transport is not a raft.LoobackTransport", i)
 	}
-	for _, other := range k.transports {
+	for j, other := range k.transports {
+		if j == i {
+			continue
+		}
 		this.Connect(other.LocalAddr(), other)
 		other.Connect(this.LocalAddr(), this)
 	}

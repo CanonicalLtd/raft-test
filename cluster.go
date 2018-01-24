@@ -97,20 +97,40 @@ func Shutdown(t testing.TB, rafts []*raft.Raft) {
 	for i, r := range rafts {
 		futures[i] = r.Shutdown()
 	}
-	for i, future := range futures {
-		if err := future.Error(); err != nil {
-			t.Fatalf("failed to shutdown raft node %d: %v", i, err)
+	errors := make(chan error, 3)
+	for _, future := range futures {
+		go func(future raft.Future) {
+			errors <- future.Error()
+		}(future)
+	}
+	timeout := time.After(5 * time.Second)
+
+	for _ = range futures {
+		select {
+		case <-timeout:
+			t.Fatalf("cluster did not shutdown within 5 second")
+		case err := <-errors:
+			if err != nil {
+				t.Fatalf("failed to shutdown raft node: %v", err)
+			}
 		}
 	}
 }
 
-// Other the index of a raft.Raft node which differs from the given one.
+// Other the index of a raft.Raft node which differs from the given ones.
 //
 // This is useful in combination with Notify to get a node that is not
 // currently in leader state.
-func Other(rafts []*raft.Raft, i int) int {
+func Other(rafts []*raft.Raft, indexes ...int) int {
 	for j := range rafts {
-		if i != j {
+		different := true
+		for _, i := range indexes {
+			if i == j {
+				different = false
+				break
+			}
+		}
+		if different {
 			return j
 		}
 	}

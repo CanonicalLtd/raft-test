@@ -59,6 +59,24 @@ type FSMWatcherAPI struct {
 	wrappers []*fsmWrapper
 }
 
+// LastIndex returns the last index applied by the FSM with the given
+// index.
+func (w *FSMWatcherAPI) LastIndex(i int) uint64 {
+	return w.wrappers[i].index
+}
+
+// LastSnapshot returns the last snapshot performed by the FSM with the given
+// index.
+func (w *FSMWatcherAPI) LastSnapshot(i int) uint64 {
+	return w.wrappers[i].snapshots
+}
+
+// LastRestore returns the last restore performed by the FSM with the given
+// index.
+func (w *FSMWatcherAPI) LastRestore(i int) uint64 {
+	return w.wrappers[i].restores
+}
+
 // WaitIndex blocks until the FSM with the given index has reached at least the
 // given log.
 //
@@ -90,6 +108,7 @@ func (w *FSMWatcherAPI) WaitSnapshot(i int, n uint64, timeout time.Duration) {
 		helper.Helper()
 	}
 
+	w.t.Logf("%d: fsm: wait for snapshot %d", i, n)
 	wrapper := w.wrappers[i]
 	check := func() bool {
 		wrapper.mu.Lock()

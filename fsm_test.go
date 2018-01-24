@@ -48,6 +48,9 @@ func TestFSMWatcher_WaitIndex(t *testing.T) {
 
 	watcher.WaitIndex(0, 2, time.Second)
 	watcher.WaitIndex(1, 3, time.Second)
+
+	assert.Equal(t, uint64(2), watcher.LastIndex(0))
+	assert.Equal(t, uint64(3), watcher.LastIndex(1))
 }
 
 func TestFSMWatcher_WaitIndexTimeout(t *testing.T) {
@@ -89,6 +92,9 @@ func TestFSMWatcher_WaitSnapshot(t *testing.T) {
 
 	watcher.WaitSnapshot(0, 1, time.Second)
 	watcher.WaitSnapshot(1, 2, time.Second)
+
+	assert.Equal(t, uint64(1), watcher.LastSnapshot(0))
+	assert.Equal(t, uint64(2), watcher.LastSnapshot(1))
 }
 
 func TestFSMWatcher_WaitRestore(t *testing.T) {
@@ -106,4 +112,7 @@ func TestFSMWatcher_WaitRestore(t *testing.T) {
 
 	watcher.WaitRestore(0, 1, time.Second)
 	watcher.WaitRestore(1, 2, time.Second)
+
+	assert.Equal(t, uint64(1), watcher.LastRestore(0))
+	assert.Equal(t, uint64(2), watcher.LastRestore(1))
 }

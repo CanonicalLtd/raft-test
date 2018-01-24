@@ -44,6 +44,22 @@ func TestOther(t *testing.T) {
 	assert.NotEqual(t, raft.Leader, rafts[j].State())
 }
 
+// Get a node other than the leader and a certainf follower.
+func TestOther_Multi(t *testing.T) {
+	notify := rafttest.Notify()
+	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
+	defer cleanup()
+
+	i := notify.NextAcquired(time.Second)
+	j := rafttest.Other(rafts, i)
+	k := rafttest.Other(rafts, i, j)
+
+	assert.NotEqual(t, i, j)
+	assert.NotEqual(t, j, k)
+	assert.NotEqual(t, i, k)
+	assert.NotEqual(t, raft.Leader, rafts[j].State())
+}
+
 // If there's only a single node, Other returns -1.
 func TestOther_SingleNode(t *testing.T) {
 	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))

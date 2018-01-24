@@ -102,12 +102,12 @@ func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 func (k *NotifyKnob) pre(cluster *cluster) {
 	k.t = cluster.t
 
-	// Use a large pool, so raft won't block on us and tests can proceed
-	// asynchronously.
-	k.notifyChs = make([]chan bool, len(cluster.nodes), 1000)
+	k.notifyChs = make([]chan bool, len(cluster.nodes))
 
 	for i, node := range cluster.nodes {
-		notifyCh := make(chan bool)
+		// Use a large pool, so raft won't block on us and tests can proceed
+		// asynchronously.
+		notifyCh := make(chan bool, 1000)
 		node.Config.NotifyCh = notifyCh
 		k.notifyChs[i] = notifyCh
 	}
