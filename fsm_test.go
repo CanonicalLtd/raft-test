@@ -116,3 +116,26 @@ func TestFSMWatcher_WaitRestore(t *testing.T) {
 	assert.Equal(t, uint64(1), watcher.LastRestore(0))
 	assert.Equal(t, uint64(2), watcher.LastRestore(1))
 }
+
+func TestFSM_HookIndex(t *testing.T) {
+	fsms := rafttest.FSMs(2)
+
+	ch := make(chan struct{})
+
+	watcher := rafttest.FSMWatcher(t, fsms)
+	watcher.HookIndex(0, 2, func() {
+		ch <- struct{}{}
+	})
+
+	go func() {
+		fsms[0].Apply(&raft.Log{Index: 1})
+		fsms[0].Apply(&raft.Log{Index: 2})
+	}()
+
+	select {
+	case <-ch:
+	case <-time.After(500 * time.Millisecond):
+		t.Error("hook was not invoked")
+	}
+
+}

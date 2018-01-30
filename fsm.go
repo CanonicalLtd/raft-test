@@ -45,7 +45,7 @@ func FSMWatcher(t testing.TB, fsms []raft.FSM) *FSMWatcherAPI {
 		wrappers: make([]*fsmWrapper, len(fsms)),
 	}
 	for i, fsm := range fsms {
-		wrapper := &fsmWrapper{t: t, fsm: fsm}
+		wrapper := newWrapper(t, fsm)
 		api.wrappers[i] = wrapper
 		fsms[i] = wrapper
 	}
@@ -75,6 +75,13 @@ func (w *FSMWatcherAPI) LastSnapshot(i int) uint64 {
 // index.
 func (w *FSMWatcherAPI) LastRestore(i int) uint64 {
 	return w.wrappers[i].restores
+}
+
+// HookIndex configures the wrapper FSM to invoke the given function when the
+// log with the given index is applied. The wrapper FSM will wait for the given
+// function to return before actually applying the log.
+func (w *FSMWatcherAPI) HookIndex(i int, index uint64, hook func()) {
+	w.wrappers[i].hooks[index] = hook
 }
 
 // WaitIndex blocks until the FSM with the given index has reached at least the
@@ -174,14 +181,28 @@ type fsmWrapper struct {
 	index     uint64
 	snapshots uint64
 	restores  uint64
+	hooks     map[uint64]func()
 	mu        sync.Mutex
+}
+
+func newWrapper(t testing.TB, fsm raft.FSM) *fsmWrapper {
+	return &fsmWrapper{
+		t:     t,
+		fsm:   fsm,
+		hooks: make(map[uint64]func()),
+	}
 }
 
 // Apply always return a nil error without doing anything.
 func (f *fsmWrapper) Apply(log *raft.Log) interface{} {
 	f.mu.Lock()
 	f.index = log.Index
+	hook := f.hooks[log.Index]
 	f.mu.Unlock()
+
+	if hook != nil {
+		hook()
+	}
 
 	return f.fsm.Apply(log)
 }
