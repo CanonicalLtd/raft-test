@@ -165,10 +165,10 @@ func newDefaultNode(t testing.TB, i int) *node {
 
 	// Decrease timeouts, since everything happens in-memory by
 	// default.
-	config.HeartbeatTimeout = 50 * time.Millisecond
-	config.ElectionTimeout = 50 * time.Millisecond
-	config.LeaderLeaseTimeout = 50 * time.Millisecond
-	config.CommitTimeout = 25 * time.Millisecond
+	config.HeartbeatTimeout = 10 * time.Millisecond
+	config.ElectionTimeout = 10 * time.Millisecond
+	config.LeaderLeaseTimeout = 10 * time.Millisecond
+	config.CommitTimeout = 5 * time.Millisecond
 
 	options := &node{
 		Config:    config,
