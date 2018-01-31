@@ -22,6 +22,7 @@ import (
 	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFSM_Restore(t *testing.T) {
@@ -82,12 +83,15 @@ func TestFSMWatcher_WaitSnapshot(t *testing.T) {
 	watcher := rafttest.FSMWatcher(t, fsms)
 
 	go func() {
-		fsms[0].Snapshot()
+		_, err := fsms[0].Snapshot()
+		require.NoError(t, err)
 	}()
 
 	go func() {
-		fsms[1].Snapshot()
-		fsms[1].Snapshot()
+		for i := 0; i < 2; i++ {
+			_, err := fsms[1].Snapshot()
+			require.NoError(t, err)
+		}
 	}()
 
 	watcher.WaitSnapshot(0, 1, time.Second)
@@ -102,12 +106,13 @@ func TestFSMWatcher_WaitRestore(t *testing.T) {
 	watcher := rafttest.FSMWatcher(t, fsms)
 
 	go func() {
-		fsms[0].Restore(nil)
+		require.NoError(t, fsms[0].Restore(nil))
 	}()
 
 	go func() {
-		fsms[1].Restore(nil)
-		fsms[1].Restore(nil)
+		for i := 0; i < 2; i++ {
+			require.NoError(t, fsms[1].Restore(nil))
+		}
 	}()
 
 	watcher.WaitRestore(0, 1, time.Second)
