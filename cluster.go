@@ -36,6 +36,12 @@ import (
 //
 // All the created nodes will part of the cluster and act as voting servers,
 // unless the Servers knob is used.
+//
+// If a GO_RAFT_TEST_LATENCY environment is found, the default configuration
+// timeouts will be scaled up accordingly (useful when running tests on slow
+// hardware). A latency of 1.0 is a no-op, since it just keeps the default
+// values unchanged. A value greater than 1.0 increases the default timeouts by
+// that factor. See also the Duration helper.
 func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, func()) {
 	helper, ok := t.(testingHelper)
 	if ok {
@@ -163,12 +169,10 @@ func newDefaultNode(t testing.TB, i int) *node {
 	config.LocalID = raft.ServerID(addr)
 	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), log.Ltime|log.Lmicroseconds)
 
-	// Decrease timeouts, since everything happens in-memory by
-	// default.
-	config.HeartbeatTimeout = 10 * time.Millisecond
-	config.ElectionTimeout = 10 * time.Millisecond
-	config.LeaderLeaseTimeout = 10 * time.Millisecond
-	config.CommitTimeout = 5 * time.Millisecond
+	config.HeartbeatTimeout = Duration(10 * time.Millisecond)
+	config.ElectionTimeout = Duration(10 * time.Millisecond)
+	config.LeaderLeaseTimeout = Duration(10 * time.Millisecond)
+	config.CommitTimeout = Duration(5 * time.Millisecond)
 
 	options := &node{
 		Config:    config,

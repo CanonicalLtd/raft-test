@@ -14,7 +14,15 @@
 
 package rafttest
 
-import "github.com/hashicorp/raft"
+import (
+	"fmt"
+	"math"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/hashicorp/raft"
+)
 
 // Config sets a hook for tweaking the raft configuration of individual nodes.
 func Config(f func(int, *raft.Config)) Knob {
@@ -35,4 +43,22 @@ func (k *configKnob) pre(cluster *cluster) {
 }
 
 func (k *configKnob) post([]*raft.Raft) {
+}
+
+// Duration is a convenience to scale the given duration according to the
+// GO_RAFT_TEST_LATENCY environment variable.
+func Duration(duration time.Duration) time.Duration {
+	factor := 1.0
+	if env := os.Getenv("GO_RAFT_TEST_LATENCY"); env != "" {
+		var err error
+		factor, err = strconv.ParseFloat(env, 64)
+		if err != nil {
+			panic(fmt.Sprintf("invalid value '%s' for GO_RAFT_TEST_LATENCY", env))
+		}
+	}
+	if factor == 1.0 {
+		return duration
+	}
+
+	return time.Duration((math.Ceil(float64(duration) * factor)))
 }

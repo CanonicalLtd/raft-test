@@ -96,7 +96,7 @@ func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
 			check := func() bool {
 				return k.rafts[info.On].State() != raft.Leader
 			}
-			wait(k.t, check, 25*time.Millisecond, timeout, "leader state not lost")
+			waitTimeout(timeout, k.t, check, 25*time.Millisecond, "leader state not lost")
 		}
 		k.t.Logf("node %d %s leadership", info.On, verb)
 		return info.On

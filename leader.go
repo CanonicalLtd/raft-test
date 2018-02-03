@@ -15,6 +15,7 @@
 package rafttest
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -26,15 +27,10 @@ import (
 //
 // It fails the test if this doesn't happen within the specified timeout.
 func WaitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	check := func() bool {
-		return raft.Leader() != ""
-	}
-	wait(t, check, 25*time.Millisecond, timeout, "no leader was set")
+	waitLeader(ctx, t, raft)
 }
 
 // FindLeader blocks until one of the given raft instance sets a leader, and returns
@@ -47,10 +43,13 @@ func FindLeader(t testing.TB, rafts []*raft.Raft, timeout time.Duration) int {
 		helper.Helper()
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	start := time.Now()
 	for _, r := range rafts {
 		go func(r *raft.Raft) {
-			WaitLeader(t, r, timeout)
+			waitLeader(ctx, t, r)
 		}(r)
 	}
 	timeout -= time.Since(start)
@@ -68,4 +67,16 @@ func FindLeader(t testing.TB, rafts []*raft.Raft, timeout time.Duration) int {
 		timeout -= 25 * time.Millisecond
 		time.Sleep(25 * time.Millisecond)
 	}
+}
+
+func waitLeader(ctx context.Context, t testing.TB, raft *raft.Raft) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	check := func() bool {
+		return raft.Leader() != ""
+	}
+	wait(ctx, t, check, 25*time.Millisecond, "no leader was set")
 }

@@ -15,23 +15,27 @@
 package rafttest
 
 import (
+	"context"
 	"testing"
 	"time"
 )
 
 // Poll the given function at the given internval, until it returns true, or
-// the timeout expires.
-func wait(t testing.TB, f func() bool, interval, timeout time.Duration, message string) {
+// the given context expires.
+func wait(ctx context.Context, t testing.TB, f func() bool, interval time.Duration, message string) {
 	helper, ok := t.(testingHelper)
 	if ok {
 		helper.Helper()
 	}
 
-	timer := time.After(timeout)
+	start := time.Now()
 	for {
 		select {
-		case <-timer:
-			t.Fatalf("%s within %s", message, timeout)
+		case <-ctx.Done():
+			if err := ctx.Err(); err == context.Canceled {
+				return
+			}
+			t.Fatalf("%s within %s", message, time.Since(start))
 		default:
 		}
 		if f() {
@@ -39,4 +43,13 @@ func wait(t testing.TB, f func() bool, interval, timeout time.Duration, message 
 		}
 		time.Sleep(interval)
 	}
+}
+
+// Poll the given function at the given internval, until it returns true, or
+// the given timeout expires.
+func waitTimeout(timeout time.Duration, t testing.TB, f func() bool, interval time.Duration, message string) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	wait(ctx, t, f, interval, message)
 }

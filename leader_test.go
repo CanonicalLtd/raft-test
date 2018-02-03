@@ -58,7 +58,6 @@ func TestFindLeader(t *testing.T) {
 }
 
 func TestFindLeader_Timeout(t *testing.T) {
-	// A node with a single node won't be able to perform an election.
 	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
 	defer cleanup()
 
@@ -68,7 +67,7 @@ func TestFindLeader_Timeout(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		rafttest.FindLeader(&testing.T{}, rafts, time.Microsecond)
+		rafttest.FindLeader(&testing.T{}, rafts, time.Nanosecond)
 		succeeded = true
 	}()
 	wg.Wait()
