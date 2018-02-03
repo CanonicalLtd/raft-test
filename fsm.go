@@ -102,7 +102,7 @@ func (w *FSMWatcherAPI) WaitIndex(i int, index uint64, timeout time.Duration) {
 	}
 
 	message := fmt.Sprintf("fsm %d did not reach index %d (last is %d)", i, index, wrapper.index)
-	wait(w.t, check, 25*time.Millisecond, timeout, message)
+	waitTimeout(timeout, w.t, check, 25*time.Millisecond, message)
 }
 
 // WaitSnapshot blocks until the FSM with the given index has reached at least the
@@ -124,7 +124,7 @@ func (w *FSMWatcherAPI) WaitSnapshot(i int, n uint64, timeout time.Duration) {
 	}
 
 	message := fmt.Sprintf("fsm %d did not reach snapshot %d", i, n)
-	wait(w.t, check, 25*time.Millisecond, timeout, message)
+	waitTimeout(timeout, w.t, check, 25*time.Millisecond, message)
 }
 
 // WaitRestore blocks until the FSM with the given index has reached at least the
@@ -146,7 +146,7 @@ func (w *FSMWatcherAPI) WaitRestore(i int, n uint64, timeout time.Duration) {
 	}
 
 	message := fmt.Sprintf("fsm %d did not reach restore %d", i, n)
-	wait(w.t, check, 25*time.Millisecond, timeout, message)
+	waitTimeout(timeout, w.t, check, 25*time.Millisecond, message)
 }
 
 // fsm is a dummy raft finite state machine that does nothing and

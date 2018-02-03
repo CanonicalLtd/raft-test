@@ -9,7 +9,6 @@ before_install:
 script:
   - go vet
   - golint
-  - errcheck
   - deadcode
   - $HOME/gopath/bin/goveralls -v -service=travis-ci
 
