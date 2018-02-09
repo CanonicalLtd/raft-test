@@ -26,19 +26,9 @@ import (
 // If the transports returned by the factory do not implement
 // LoopbackTransport, the Disconnect API won't work.
 func Transport(factory func(int) raft.Transport) Knob {
-	return &transportKnob{factory: factory}
-}
-
-// transportKnob return a custom transport for a node.
-type transportKnob struct {
-	factory func(int) raft.Transport
-}
-
-func (k *transportKnob) pre(cluster *cluster) {
-	for i, node := range cluster.nodes {
-		node.Transport = k.factory(i)
+	return func(nodes map[int]*node) {
+		for i, node := range nodes {
+			node.Transport = factory(i)
+		}
 	}
-}
-
-func (k *transportKnob) post([]*raft.Raft) {
 }

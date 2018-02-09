@@ -15,9 +15,8 @@
 package rafttest
 
 import (
-	"fmt"
-	"os"
-	"strconv"
+	"io/ioutil"
+	"log"
 	"time"
 
 	"github.com/hashicorp/raft"
@@ -25,23 +24,11 @@ import (
 
 // Config sets a hook for tweaking the raft configuration of individual nodes.
 func Config(f func(int, *raft.Config)) Knob {
-	return &configKnob{
-		f: f,
+	return func(nodes map[int]*node) {
+		for i, node := range nodes {
+			f(i, node.Config)
+		}
 	}
-}
-
-// configKnob gives access to the Config objects used by the various nodes.
-type configKnob struct {
-	f func(int, *raft.Config)
-}
-
-func (k *configKnob) pre(cluster *cluster) {
-	for i, node := range cluster.nodes {
-		k.f(i, node.Config)
-	}
-}
-
-func (k *configKnob) post([]*raft.Raft) {
 }
 
 // Latency is a convenience around Config that scales the values of the various
@@ -60,16 +47,10 @@ func Latency(factor float64) Knob {
 	})
 }
 
-// Duration is a convenience to scale the given duration according to the
-// GO_RAFT_TEST_LATENCY environment variable.
-func Duration(duration time.Duration) time.Duration {
-	factor := 1.0
-	if env := os.Getenv("GO_RAFT_TEST_LATENCY"); env != "" {
-		var err error
-		factor, err = strconv.ParseFloat(env, 64)
-		if err != nil {
-			panic(fmt.Sprintf("invalid value '%s' for GO_RAFT_TEST_LATENCY", env))
-		}
-	}
-	return scaleDuration(duration, factor)
+// DiscardLogger is a convenience around Config that sets the output stream of
+// raft's logger to ioutil.Discard
+func DiscardLogger() Knob {
+	return Config(func(i int, config *raft.Config) {
+		config.Logger = log.New(ioutil.Discard, "", 0)
+	})
 }

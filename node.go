@@ -25,8 +25,8 @@ import (
 //
 // The default network address of a test node is "0".
 //
-// Dependencies can be replaced or mutated using the various NodeOption knobs.
-func Node(t *testing.T, fsm raft.FSM, knobs ...Knob) *raft.Raft {
+// Dependencies can be replaced or mutated using the various knobs.
+func Node(t *testing.T, fsm raft.FSM, knobs ...Knob) (*raft.Raft, func()) {
 	fsms := []raft.FSM{fsm}
 
 	config := Config(func(i int, config *raft.Config) {
@@ -36,7 +36,7 @@ func Node(t *testing.T, fsm raft.FSM, knobs ...Knob) *raft.Raft {
 		config.StartAsLeader = true
 	})
 
-	rafts, _ := Cluster(t, fsms, config)
+	rafts, control := Cluster(t, fsms, config)
 
-	return rafts[0]
+	return rafts[0], control.Close
 }

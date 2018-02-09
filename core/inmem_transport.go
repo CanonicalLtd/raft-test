@@ -1,6 +1,6 @@
 // Copied from freeekanayaka:fix-inmem-transport-race to fix #274
 
-package rafttest
+package core
 
 import (
 	"crypto/rand"

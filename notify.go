@@ -15,154 +15,94 @@
 package rafttest
 
 import (
+	"context"
 	"reflect"
-	"testing"
-	"time"
-
-	"github.com/hashicorp/raft"
 )
 
-// Notify exposes APIs to block until a node of the cluster acquires or loses
-// leadership.
-func Notify() *NotifyKnob {
-	return &NotifyKnob{
-		ch: make(chan leadershipChange),
-	}
-}
-
-// NotifyKnob can be used for receiving leadershipChange notifications
-// whenever the leadership status of a node in the cluster changes.
-type NotifyKnob struct {
-	t         testing.TB
+// Receive leadershipChange notifications whenever the leadership status of a
+// node in the cluster changes.
+//
+// It's essentially a "demultiplexer" of the various Config.NotifyCh attached
+// to the various nodes.
+type notifyWatcher struct {
+	cancel    context.CancelFunc
 	ch        chan leadershipChange
 	notifyChs []chan bool
-	rafts     []*raft.Raft
 }
 
-// NextAcquired blocks until this channel receives a leadershipChange object whose
-// Acquired attribute is true, and then returns its Node attribute.
+func newNotifyWatcher(notifyChs []chan bool) *notifyWatcher {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	watcher := &notifyWatcher{
+		cancel:    cancel,
+		ch:        make(chan leadershipChange),
+		notifyChs: notifyChs,
+	}
+
+	go watcher.start(ctx)
+
+	return watcher
+}
+
+// Close stops the goroutine that monitors the underlying notify channels.
+func (w *notifyWatcher) Close() {
+	w.cancel()
+}
+
+// Next returns the next leadershipChange happening in the cluster.
 //
-// All leadershipChange objects received whose Acquired attribute is set to
-// false will be discarded.
-//
-// It fails the test if no matching leadershipChange is received within the
-// timeout.
-func (k *NotifyKnob) NextAcquired(timeout time.Duration) int {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	return k.nextMatching(timeout, true)
-}
-
-// NextLost blocks until this channel receives a leadershipChange object whose
-// Acquired attribute is false, and then returns its Node attribute.
-//
-// All leadershipChange objects received whose Acquired attribute is set to
-// true will be discarded.
-//
-// It fails the test if no matching leadershipChange is received within the
-// timeout.
-func (k *NotifyKnob) NextLost(timeout time.Duration) int {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	return k.nextMatching(timeout, false)
-}
-
-// Return the next leadershipChange received matching 'acquired'.
-func (k *NotifyKnob) nextMatching(timeout time.Duration, acquired bool) int {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	for {
-		start := time.Now()
-		info := k.next(timeout)
-		if info.Acquired != acquired {
-			timeout -= time.Since(start)
-			continue
-		}
-		verb := ""
-		if acquired {
-			verb = "acquired"
-			WaitLeader(k.t, k.rafts[info.On], timeout)
-		} else {
-			verb = "lost"
-			check := func() bool {
-				return k.rafts[info.On].State() != raft.Leader
-			}
-			waitTimeout(timeout, k.t, check, 25*time.Millisecond, "leader state not lost")
-		}
-		k.t.Logf("node %d %s leadership", info.On, verb)
-		return info.On
-	}
-}
-
-func (k *NotifyKnob) pre(cluster *cluster) {
-	k.t = cluster.t
-
-	k.notifyChs = make([]chan bool, len(cluster.nodes))
-
-	for i, node := range cluster.nodes {
-		// Use a large pool, so raft won't block on us and tests can proceed
-		// asynchronously.
-		notifyCh := make(chan bool, 1000)
-		node.Config.NotifyCh = notifyCh
-		k.notifyChs[i] = notifyCh
-	}
-	go k.watch()
-}
-
-func (k *NotifyKnob) post(rafts []*raft.Raft) {
-	k.rafts = rafts
-}
-
-// Block until there's a leadership change in any node of the cluster, and then
-// returns a leadershipChange object with the relevant information.
-//
-// It fails the test if no leadershipChange is received within the given timeout.
-func (k *NotifyKnob) next(timeout time.Duration) (info leadershipChange) {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
+// If the context is done before a notification is received, nil is returned.
+func (w *notifyWatcher) Next(ctx context.Context) *leadershipChange {
 	select {
-	case info = <-k.ch:
-		return
-	case <-time.After(timeout):
-		k.t.Fatalf("no notification received within %s", timeout)
-		return
+	case info := <-w.ch:
+		return &info
+	case <-ctx.Done():
+		return nil
 	}
 }
 
-func (k *NotifyKnob) watch() {
-	n := len(k.notifyChs)
-	cases := make([]reflect.SelectCase, n)
+// Start watching all the notify channles and feeds notification to our
+// "demultiplexer" channel
+//
+// The loop will be terminated once the context is done.
+func (w *notifyWatcher) start(ctx context.Context) {
+	n := len(w.notifyChs)
+	cases := make([]reflect.SelectCase, n+1)
 
-	for i, notifyCh := range k.notifyChs {
+	// Create a select case for each of the notify channels we're watching.
+	for i, ch := range w.notifyChs {
 		cases[i] = reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(notifyCh),
+			Chan: reflect.ValueOf(ch),
 		}
 	}
 
-	// Loop until all nodes have shutdown and closed their
-	// notifyCh.
-	for len(cases) > 1 {
+	// Create a select case for the ctx.Done() channel.
+	done := len(cases) - 1
+	cases[done] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
+
+	// Loop until the context is done.
+	for {
 		i, value, ok := reflect.Select(cases)
-		if !ok {
-			// Remove from the select cases the notify
-			// channels that have been closed, since that
-			// means the node was shutdown.
-			cases = append(cases[:i], cases[i+1:]...)
+
+		// If the done channel was selected, we quit.
+		if i == done {
+			if ok {
+				panic("ctx.Done() channel was selected but it wasn't closed")
+			}
+			break
 		}
-		k.ch <- leadershipChange{On: i, Acquired: value.Bool()}
+
+		w.ch <- leadershipChange{On: i, Acquired: value.Bool()}
+	}
+
+	// Close all notify channels for good measure, so any attempt
+	// from raft instances to send to them will fail.
+	for _, ch := range w.notifyChs {
+		close(ch)
 	}
 }
 
@@ -170,4 +110,11 @@ func (k *NotifyKnob) watch() {
 type leadershipChange struct {
 	On       int  // The index of the node whose leadership status changed.
 	Acquired bool // Whether the leadership was acquired or lost.
+}
+
+func (c leadershipChange) Verb() string {
+	if c.Acquired {
+		return "acquired"
+	}
+	return "lost"
 }

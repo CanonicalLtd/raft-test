@@ -15,85 +15,60 @@
 package rafttest
 
 import (
-	"testing"
+	"fmt"
 
 	"github.com/hashicorp/raft"
 )
 
-// Network provides control over a mesh of connected in-memory transports.
+// Provides control over a mesh of connected in-memory transports.
 //
 // Each node must be configured with an in-memory transport. All transports
 // will be connected to each other at cluster creation time.
-func Network() *NetworkKnob {
-	return &NetworkKnob{}
-}
-
-// NetworkKnob can connect and disconnect nodes via loopback transports.
-type NetworkKnob struct {
-	t          testing.TB
+type network struct {
 	transports []raft.LoopbackTransport
 }
 
+func newNetwork(transports []raft.LoopbackTransport) *network {
+	network := &network{
+		transports: transports,
+	}
+	return network
+}
+
 // Disconnect the network transport of the raft node with the given index.
-func (k *NetworkKnob) Disconnect(i int) {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	k.t.Logf("disconnecting node %d", i)
-
-	n := len(k.transports)
-	if i < 0 || i >= n {
-		k.t.Fatalf("invalid index %d (%d nodes available)", i, n)
-	}
-	this := k.transports[i]
+func (n *network) Disconnect(i int) error {
+	this := n.transports[i]
 	if this == nil {
-		k.t.Fatalf("node %d's transport is not a raft.LoobackTransport", i)
+		return fmt.Errorf("node %d's transport is not a raft.LoobackTransport", i)
 	}
 	this.DisconnectAll()
-	for _, other := range k.transports {
+	for j, other := range n.transports {
+		if j == i {
+			continue
+		}
+		if other == nil {
+			return fmt.Errorf("node %d's transport is not a raft.LoobackTransport", j)
+		}
 		other.Disconnect(this.LocalAddr())
 	}
+	return nil
 }
 
 // Reconnect the network transport of the raft node with the given index.
-func (k *NetworkKnob) Reconnect(i int) {
-	helper, ok := k.t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
-
-	k.t.Logf("reconnecting node %d", i)
-
-	n := len(k.transports)
-	if i < 0 || i >= n {
-		k.t.Fatalf("invalid index %d (%d nodes available)", i, n)
-	}
-	this := k.transports[i]
+func (n *network) Reconnect(i int) error {
+	this := n.transports[i]
 	if this == nil {
-		k.t.Fatalf("node %d's transport is not a raft.LoobackTransport", i)
+		return fmt.Errorf("node %d's transport is not a raft.LoobackTransport", i)
 	}
-	for j, other := range k.transports {
+	for j, other := range n.transports {
 		if j == i {
 			continue
+		}
+		if other == nil {
+			return fmt.Errorf("node %d's transport is not a raft.LoobackTransport", j)
 		}
 		this.Connect(other.LocalAddr(), other)
 		other.Connect(this.LocalAddr(), this)
 	}
-}
-
-func (k *NetworkKnob) pre(cluster *cluster) {
-	k.t = cluster.t
-	k.transports = make([]raft.LoopbackTransport, len(cluster.nodes))
-	for i, node := range cluster.nodes {
-		loopback, ok := node.Transport.(raft.LoopbackTransport)
-		if !ok {
-			k.t.Fatalf("transport for node %d does not implement LoopbackTransport", i)
-		}
-		k.transports[i] = loopback
-	}
-}
-
-func (k *NetworkKnob) post([]*raft.Raft) {
+	return nil
 }

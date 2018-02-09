@@ -15,9 +15,26 @@
 package rafttest
 
 import (
+	"fmt"
 	"math"
+	"os"
+	"strconv"
 	"time"
 )
+
+// Duration is a convenience to scale the given duration according to the
+// GO_RAFT_TEST_LATENCY environment variable.
+func Duration(duration time.Duration) time.Duration {
+	factor := 1.0
+	if env := os.Getenv("GO_RAFT_TEST_LATENCY"); env != "" {
+		var err error
+		factor, err = strconv.ParseFloat(env, 64)
+		if err != nil {
+			panic(fmt.Sprintf("invalid value '%s' for GO_RAFT_TEST_LATENCY", env))
+		}
+	}
+	return scaleDuration(duration, factor)
+}
 
 func scaleDuration(duration time.Duration, factor float64) time.Duration {
 	if factor == 1.0 {

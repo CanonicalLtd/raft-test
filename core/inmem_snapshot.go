@@ -1,6 +1,6 @@
 // Copied from freeekanayaka:fix-inmem-snapshot-open-twice to fix #269
 
-package rafttest
+package core
 
 import (
 	"bytes"
