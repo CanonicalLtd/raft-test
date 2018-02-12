@@ -293,6 +293,11 @@ func (i *inmemPipeline) AppendEntries(args *raft.AppendEntriesRequest, resp *raf
 		RespChan: respCh,
 	}
 	select {
+	case <-i.shutdownCh:
+		return nil, raft.ErrPipelineShutdown
+	default:
+	}
+	select {
 	case i.peer.consumerCh <- rpc:
 	case <-timeout:
 		return nil, fmt.Errorf("command enqueue timeout")
