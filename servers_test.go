@@ -29,11 +29,10 @@ import (
 func TestServers(t *testing.T) {
 	fsms := rafttest.FSMs(3)
 	servers := rafttest.Servers(0)
-	notify := rafttest.Notify()
-	rafts, cleanup := rafttest.Cluster(t, fsms, servers, notify)
-	defer cleanup()
+	rafts, control := rafttest.Cluster(t, fsms, servers)
+	defer control.Close()
 
-	assert.Equal(t, 0, notify.NextAcquired(time.Second))
+	assert.Equal(t, rafts[0], control.LeadershipAcquired(time.Second))
 
 	assert.Equal(t, raft.Leader, rafts[0].State())
 	future := rafts[0].GetConfiguration()

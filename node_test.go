@@ -24,9 +24,10 @@ import (
 )
 
 func TestNode_StartAndShutdown(t *testing.T) {
-	r := rafttest.Node(t, rafttest.FSM())
+	r, cleanup := rafttest.Node(t, rafttest.FSM())
+	defer cleanup()
+
 	assert.Equal(t, raft.Leader, r.State())
 	assert.Equal(t, raft.ServerAddress("0"), r.Leader())
 	assert.NoError(t, r.Apply([]byte{}, time.Second).Error())
-	assert.NoError(t, r.Shutdown().Error())
 }

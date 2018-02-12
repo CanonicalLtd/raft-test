@@ -16,54 +16,15 @@ package rafttest_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
 )
 
 // Create and shutdown a cluster.
 func TestCluster_CreateAndShutdown(t *testing.T) {
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
-	defer cleanup()
+	rafts, control := rafttest.Cluster(t, rafttest.FSMs(1))
+	defer control.Close()
 
 	assert.Len(t, rafts, 1)
-}
-
-// Get a node other than the leader.
-func TestOther(t *testing.T) {
-	notify := rafttest.Notify()
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
-	defer cleanup()
-
-	i := notify.NextAcquired(time.Second)
-	j := rafttest.Other(rafts, i)
-
-	assert.NotEqual(t, i, j)
-	assert.NotEqual(t, raft.Leader, rafts[j].State())
-}
-
-// Get a node other than the leader and a certainf follower.
-func TestOther_Multi(t *testing.T) {
-	notify := rafttest.Notify()
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), notify)
-	defer cleanup()
-
-	i := notify.NextAcquired(time.Second)
-	j := rafttest.Other(rafts, i)
-	k := rafttest.Other(rafts, i, j)
-
-	assert.NotEqual(t, i, j)
-	assert.NotEqual(t, j, k)
-	assert.NotEqual(t, i, k)
-	assert.NotEqual(t, raft.Leader, rafts[j].State())
-}
-
-// If there's only a single node, Other returns -1.
-func TestOther_SingleNode(t *testing.T) {
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(1))
-	defer cleanup()
-
-	assert.Equal(t, -1, rafttest.Other(rafts, 0))
 }

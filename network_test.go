@@ -14,16 +14,7 @@
 
 package rafttest_test
 
-import (
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
-	"github.com/stretchr/testify/assert"
-)
-
+/*
 func TestNetwork_Disconnect(t *testing.T) {
 	notify := rafttest.Notify()
 	network := rafttest.Network()
@@ -65,3 +56,4 @@ func TestNetwork_DisconnectInvalidIndex(t *testing.T) {
 
 	assert.False(t, succeeded)
 }
+*/

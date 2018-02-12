@@ -10,7 +10,7 @@ script:
   - go vet
   - golint
   - deadcode
-  - $HOME/gopath/bin/goveralls -v -service=travis-ci
+  - $HOME/gopath/bin/goveralls -v -service=travis-ci -flags -test.timeout -flags 15s
 
 go:
   - 1.8

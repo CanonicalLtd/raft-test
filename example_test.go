@@ -27,100 +27,90 @@ import (
 func Example() {
 	t := &testing.T{}
 
-	// Create 3 raft FSMs and wrap them with a watcher.
+	// Create 3 dummy raft FSMs.
 	fsms := rafttest.FSMs(3)
-	watcher := rafttest.FSMWatcher(t, fsms)
 
-	// Create a cluster knob to get notified of leadership changes.
-	notify := rafttest.Notify()
-
-	// Create a cluster knob to control network connectivity and be able to
-	// simulate transport disconnections.
-	network := rafttest.Network()
-
-	// Create a cluster knob to tweak the raft configuration to have a very
-	// aggressive snapshot cadence.
+	// Create a cluster knob to tweak the raft configuration to perform
+	// a snapshot after about 50 millisecond.
 	config := rafttest.Config(func(n int, config *raft.Config) {
-		config.SnapshotInterval = 20 * time.Millisecond
-		config.SnapshotThreshold = 4
-		config.TrailingLogs = 2
+		config.SnapshotInterval = 50 * time.Millisecond
+		config.SnapshotThreshold = 7
+		config.TrailingLogs = 1
+		config.ElectionTimeout = 300 * time.Millisecond
+		config.HeartbeatTimeout = 250 * time.Millisecond
+		config.LeaderLeaseTimeout = 250 * time.Millisecond
 	})
 
-	// Create a cluster of raft instances, setup with the above knobs.
-	rafts, cleanup := rafttest.Cluster(t, fsms, notify, network, config)
-	defer cleanup()
+	// Create a cluster of raft instances, setup with the above knob.
+	rafts, control := rafttest.Cluster(t, fsms, config)
+	defer control.Close()
 
-	// Get the index of the first raft instance to acquiring leadership.
-	i := notify.NextAcquired(time.Second)
-	r := rafts[i]
+	// Get the first raft instance to acquiring leadership.
+	raft1 := control.LeadershipAcquired(time.Second)
 
 	// Apply a log and wait for for all FSMs to apply it.
-	err := r.Apply([]byte{}, time.Second).Error()
+	err := raft1.Apply([]byte{}, time.Second).Error()
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := range fsms {
-		watcher.WaitIndex(i, 3, time.Second)
+	for _, raft := range rafts {
+		control.WaitIndex(raft, 3, time.Second)
 	}
 
-	// Get the index of one of the two follower raft instances.
-	j := rafttest.Other(rafts, i)
+	// Get one of the two follower raft instances.
+	raft2 := control.Other(raft1)
 
-	// Simulate a network disconnection of raft instance j.
-	network.Disconnect(j)
+	// Simulate a network disconnection of the follower.
+	control.Disconnect(raft2)
 
-	// Get the index of the other two follower raft instance.
-	k := rafttest.Other(rafts, i, j)
+	// Get the other follower raft instance.
+	raft3 := control.Other(raft1, raft2)
 
-	// Keep track of the last snapshot performed on instance i and k.
-	snapshotI := watcher.LastSnapshot(i)
-	snapshotK := watcher.LastSnapshot(k)
-
-	// Apply another few logs, leaving raft instance j behind.
-	for i := 0; i < 10; i++ {
-		err := r.Apply([]byte{}, time.Second).Error()
+	// Apply another few logs, leaving raft instance raft2 behind.
+	for i := 0; i < 5; i++ {
+		err := raft1.Apply([]byte{}, time.Second).Error()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}
 
 	// Wait for the FSMs of the two connected raft instances to apply the logs.
-	watcher.WaitIndex(i, 13, time.Second)
-	watcher.WaitIndex(k, 13, time.Second)
+	control.WaitIndex(raft1, 8, time.Second)
+	control.WaitIndex(raft3, 8, time.Second)
 
-	// Make sure a further snapshot is taken by the leader and the follower.
-	watcher.WaitSnapshot(i, snapshotI+1, time.Second)
-	watcher.WaitSnapshot(k, snapshotK+1, time.Second)
+	// Make sure a snapshot is taken by the leader and the follower.
+	control.WaitSnapshot(raft1, 1, time.Second)
+	control.WaitSnapshot(raft3, 1, time.Second)
 
-	// Reconnect raft instance j.
-	network.Reconnect(j)
+	// Reconnect the disconnected follower.
+	control.Reconnect(raft2)
 
-	// Wait for raft instance j to use a snapshot shipped by the leader to
-	// catch up with logs.
-	watcher.WaitRestore(j, 1, 3*time.Second)
+	// Wait for the reconnected follower to use the snapshot shipped by the
+	// leader to catch up with logs.
+	control.WaitRestore(raft2, 1, time.Second)
 
-	// Apply another log an check that the disconnected node has caught
-	// up. It might be that node i lost leadership, in that case we retry
+	// Apply other logs an check that the disconnected node has caught
+	// up. It might be that raft1 lost leadership, in that case we retry
 	// with the next leader.
-	for n := 0; n < 10; i++ {
-		err = r.Apply([]byte{}, time.Second).Error()
-		if err == nil {
+	for i := 0; i < 5; i++ {
+		err := raft1.Apply([]byte{}, time.Second).Error()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	timer := time.After(time.Second)
+	for {
+		select {
+		case <-timer:
+			t.Fatalf("disconnected node did not catch up with logs")
+		default:
+		}
+		if raft2.AppliedIndex() >= 13 {
 			break
 		}
-		if err == raft.ErrNotLeader {
-			i = notify.NextAcquired(time.Second)
-			r = rafts[i]
-			continue
-		}
-		break
 	}
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	watcher.WaitIndex(j, 14, time.Second)
-
 	// Output:
 	// true
-	fmt.Println(rafts[j].AppliedIndex() >= 14)
+	fmt.Println(raft2.AppliedIndex() == 13)
 }

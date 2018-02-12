@@ -26,8 +26,8 @@ import (
 
 // The Latency knobs tweaks the default raft timeouts.
 func TestCluster_Latency(t *testing.T) {
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Latency(1000.0))
-	defer cleanup()
+	rafts, control := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Latency(1000.0))
+	defer control.Close()
 
 	time.Sleep(250 * time.Millisecond)
 
@@ -48,8 +48,8 @@ func TestCluster_LatencyEnv(t *testing.T) {
 	}
 	os.Setenv("GO_RAFT_TEST_LATENCY", "1000.0")
 
-	rafts, cleanup := rafttest.Cluster(t, rafttest.FSMs(3))
-	defer cleanup()
+	rafts, control := rafttest.Cluster(t, rafttest.FSMs(3))
+	defer control.Close()
 
 	time.Sleep(250 * time.Millisecond)
 

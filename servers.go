@@ -14,30 +14,18 @@
 
 package rafttest
 
-import "github.com/hashicorp/raft"
-
 // Servers can be used to indicate which nodes should be initially part of the
 // created cluster.
 //
 // If this knob is not used, the default is to have all nodes be part of the
 // cluster.
 func Servers(indexes ...int) Knob {
-	return &serversKnob{indexes: indexes}
-}
-
-// serversKnob return a custom servers for a node.
-type serversKnob struct {
-	indexes []int
-}
-
-func (k *serversKnob) pre(cluster *cluster) {
-	for _, node := range cluster.nodes {
-		node.Bootstrap = false
+	return func(nodes map[int]*node) {
+		for _, node := range nodes {
+			node.Bootstrap = false
+		}
+		for _, index := range indexes {
+			nodes[index].Bootstrap = true
+		}
 	}
-	for _, index := range k.indexes {
-		cluster.nodes[index].Bootstrap = true
-	}
-}
-
-func (k *serversKnob) post([]*raft.Raft) {
 }
