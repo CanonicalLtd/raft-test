@@ -15,17 +15,17 @@
 package rafttest_test
 
 import (
+	"fmt"
 	"log"
 	"testing"
 	"time"
 
 	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
-	"github.com/stretchr/testify/assert"
 )
 
-func TestExample(t *testing.T) {
-	//t := &testing.T{}
+func Example() {
+	t := &testing.T{}
 
 	// Create 3 dummy raft FSMs.
 	fsms := rafttest.FSMs(3)
@@ -34,8 +34,11 @@ func TestExample(t *testing.T) {
 	// a snapshot after about 50 millisecond.
 	config := rafttest.Config(func(n int, config *raft.Config) {
 		config.SnapshotInterval = 50 * time.Millisecond
-		config.SnapshotThreshold = 4
+		config.SnapshotThreshold = 7
 		config.TrailingLogs = 1
+		config.ElectionTimeout = 300 * time.Millisecond
+		config.HeartbeatTimeout = 250 * time.Millisecond
+		config.LeaderLeaseTimeout = 250 * time.Millisecond
 	})
 
 	// Create a cluster of raft instances, setup with the above knob.
@@ -89,27 +92,25 @@ func TestExample(t *testing.T) {
 	// Apply other logs an check that the disconnected node has caught
 	// up. It might be that raft1 lost leadership, in that case we retry
 	// with the next leader.
-	leader := raft1
 	for i := 0; i < 5; i++ {
-		err = leader.Apply([]byte{}, time.Second).Error()
-		if err == nil {
-			continue
+		err := raft1.Apply([]byte{}, time.Second).Error()
+		if err != nil {
+			log.Fatal(err)
 		}
-		if err == raft.ErrNotLeader {
-			control.LeadershipLost(leader, time.Second)
-			leader = control.LeadershipAcquired(time.Second)
-			continue
-		}
-		break
-	}
-	if err != nil {
-		log.Fatal(err)
 	}
 
-	control.WaitIndex(raft2, 13, time.Second)
-
+	timer := time.After(time.Second)
+	for {
+		select {
+		case <-timer:
+			t.Fatalf("disconnected node did not catch up with logs")
+		default:
+		}
+		if raft2.AppliedIndex() >= 13 {
+			break
+		}
+	}
 	// Output:
 	// true
-	//fmt.Println(raft2.AppliedIndex() == 13)
-	assert.True(t, raft2.AppliedIndex() >= 13)
+	fmt.Println(raft2.AppliedIndex() == 13)
 }

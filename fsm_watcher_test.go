@@ -19,6 +19,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Convert watchers to a slice of raft.FSM interfaces
@@ -61,7 +62,9 @@ func TestFSMsWatcher_SnapshotHook(t *testing.T) {
 		triggered = true
 	})
 
-	watcher.FSMs()[0].Snapshot()
+	snapshot, err := watcher.FSMs()[0].Snapshot()
+	require.NoError(t, err)
+	snapshot.Persist(nil)
 
 	assert.True(t, triggered, "hook not triggered")
 
@@ -117,7 +120,10 @@ func TestFSMWrapper_SnapshotHook(t *testing.T) {
 		triggered = true
 	}
 
-	wrapper.Snapshot()
+	snapshot, err := wrapper.Snapshot()
+	require.NoError(t, err)
+	snapshot.Persist(nil)
+
 	assert.True(t, triggered, "hook not fired")
 }
 

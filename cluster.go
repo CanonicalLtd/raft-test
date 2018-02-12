@@ -142,8 +142,6 @@ func Shutdown(t testing.TB, rafts []*raft.Raft) {
 			// FIXME: If the raft instance has performed snapshots, it might have
 			// hit https://github.com/hashicorp/raft/issues/268 and hence
 			// be blocked. Don't fail the test in this case, but print a log message.
-
-			//err = fmt.Errorf("timeout after %s", timeout)
 			t.Logf("raft-test: node %d: blocked on shutdown", i)
 			break
 		}
@@ -235,14 +233,15 @@ func bootstrapCluster(t testing.TB, nodes map[int]*node) {
 
 		// Connect the node's transport to the transports of all other
 		// nodes that are initially part of the cluster.
-		for _, other := range nodes {
-			if other == node || !node.Bootstrap {
+		for j, other := range nodes {
+			if other == node || !other.Bootstrap {
 				// This node is not part of the cluster, don't connect to it.
 				continue
 			}
 			peers, ok := node.Transport.(raft.WithPeers)
 			if !ok {
-				t.Fatalf("raft-test: node %d: transport does not implement WithPeers", i)
+				t.Logf("raft-test: node %d: transport does not implement WithPeers", j)
+				continue
 			}
 			peers.Connect(other.Transport.LocalAddr(), other.Transport)
 		}

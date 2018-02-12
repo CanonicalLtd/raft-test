@@ -114,7 +114,7 @@ func (c *Control) LeadershipLost(r *raft.Raft, timeout time.Duration) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: wait to lose leadership within %s", i, timeout)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -145,7 +145,7 @@ func (c *Control) Disconnect(r *raft.Raft) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: disconnect", i)
 
 	err := c.network.Disconnect(i)
@@ -163,7 +163,7 @@ func (c *Control) Reconnect(r *raft.Raft) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: reconnect", i)
 
 	err := c.network.Reconnect(i)
@@ -175,8 +175,103 @@ func (c *Control) Reconnect(r *raft.Raft) {
 // AppliedIndex returns the index of the last log applied by the FSM of the
 // given raft instance.
 func (c *Control) AppliedIndex(r *raft.Raft) uint64 {
-	i := c.index(r)
+	i := c.Index(r)
 	return c.fsmsWatcher.ApplyIndex(i)
+}
+
+// ApplyHook sets a hook triggering when the FSM reaches the given index.
+func (c *Control) ApplyHook(r *raft.Raft, index uint64, hook func()) {
+	i := c.Index(r)
+	c.fsmsWatcher.ApplyHook(i, func(current uint64) {
+		if current == index {
+			hook()
+			c.fsmsWatcher.ApplyHook(i, nil)
+		}
+	})
+}
+
+// FindLeader blocks until one of the given raft instance sets a leader, and returns
+// the its index.
+//
+// It fails the test if this doesn't happen within the specified timeout.
+func (c *Control) FindLeader(timeout time.Duration) *raft.Raft {
+	helper, ok := c.t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	start := time.Now()
+	for _, r := range c.rafts {
+		go func(r *raft.Raft) {
+			waitLeader(ctx, c.t, r)
+		}(r)
+	}
+	timeout -= time.Since(start)
+
+	for {
+		for i, r := range c.rafts {
+			if r.State() == raft.Leader {
+				c.t.Logf("found leader %d", i)
+				return r
+			}
+		}
+		if timeout <= 0 {
+			c.t.Fatalf("no leader was found")
+		}
+		timeout -= 25 * time.Millisecond
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// WaitLeader blocks until the given raft instance sets a leader (which
+// could possibly be the instance itself).
+//
+// It fails the test if this doesn't happen within the specified timeout.
+func WaitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	waitLeader(ctx, t, raft)
+}
+
+func waitLeader(ctx context.Context, t testing.TB, raft *raft.Raft) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	check := func() bool {
+		return raft.Leader() != ""
+	}
+	wait(ctx, t, check, 25*time.Millisecond, "no leader was set")
+}
+
+// Poll the given function at the given internval, until it returns true, or
+// the given context expires.
+func wait(ctx context.Context, t testing.TB, f func() bool, interval time.Duration, message string) {
+	helper, ok := t.(testingHelper)
+	if ok {
+		helper.Helper()
+	}
+
+	start := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			if err := ctx.Err(); err == context.Canceled {
+				return
+			}
+			t.Fatalf("%s within %s", message, time.Since(start))
+		default:
+		}
+		if f() {
+			return
+		}
+		time.Sleep(interval)
+	}
 }
 
 // WaitIndex waits until the FSM of the given raft instance reaches at least
@@ -189,24 +284,36 @@ func (c *Control) WaitIndex(r *raft.Raft, index uint64, timeout time.Duration) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: wait for FSM to apply index %d", i, index)
 
 	// First set up a hook for intercepting the logs.
 	done := make(chan struct{})
 	c.fsmsWatcher.ApplyHook(i, func(current uint64) {
 		if current >= index {
-			done <- struct{}{}
+			close(done)
 		}
 	})
 	defer c.fsmsWatcher.ApplyHook(i, nil)
 
-	// Secondly check if the FSM has already reached the desired index
-	// (this can happen if it applied it before we set up the hook).
-	if current := c.fsmsWatcher.ApplyIndex(i); current >= index {
-		c.t.Logf("raft-test: node %d: FSM already applied up to index %d", i, current)
-		return
-	}
+	// Secondly poll the wrapper to check if the FSM has reached the
+	// desired apply count (this can happen if it startedt before we
+	// could set up the hook).
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if current := c.fsmsWatcher.ApplyIndex(i); current >= index {
+				c.t.Logf("raft-test: node %d: FSM already applied up to index %d", i, current)
+				close(done)
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
 
 	// Wait for the hook to fire the channel
 	select {
@@ -228,25 +335,36 @@ func (c *Control) WaitSnapshot(r *raft.Raft, n int, timeout time.Duration) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: wait for FSM to perform snapshot %d", i, n)
 
 	// First set up a hook for intercepting the snapshot.
 	done := make(chan struct{})
 	c.fsmsWatcher.SnapshotHook(i, func() {
 		if c.fsmsWatcher.SnapshotCount(i) >= n {
-			done <- struct{}{}
+			close(done)
 		}
 	})
 	defer c.fsmsWatcher.SnapshotHook(i, nil)
 
-	// Secondly check if the FSM has already reached the desired snapshot
-	// count (this can happen if it performed it before we set up the
-	// hook).
-	if current := c.fsmsWatcher.SnapshotCount(i); current >= n {
-		c.t.Logf("raft-test: node %d: FSM already performed %d snapshots", i, current)
-		return
-	}
+	// Secondly poll the wrapper to check if the FSM has reached the
+	// desired snapshot count (this can happen if it startedt before we
+	// could set up the hook).
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if current := c.fsmsWatcher.SnapshotCount(i); current >= n {
+				c.t.Logf("raft-test: node %d: FSM already performed %d snapshots", i, current)
+				close(done)
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
 
 	// Wait for the hook to fire the channel
 	select {
@@ -268,25 +386,36 @@ func (c *Control) WaitRestore(r *raft.Raft, n int, timeout time.Duration) {
 		helper.Helper()
 	}
 
-	i := c.index(r)
+	i := c.Index(r)
 	c.t.Logf("raft-test: node %d: wait for FSM to perform restore %d", i, n)
 
 	// First set up a hook for intercepting the restore.
 	done := make(chan struct{})
 	c.fsmsWatcher.RestoreHook(i, func() {
 		if c.fsmsWatcher.RestoreCount(i) >= n {
-			done <- struct{}{}
+			close(done)
 		}
 	})
 	defer c.fsmsWatcher.RestoreHook(i, nil)
 
-	// Secondly check if the FSM has already reached the desired restore
-	// count (this can happen if it performed it before we set up the
-	// hook).
-	if current := c.fsmsWatcher.RestoreCount(i); current >= n {
-		c.t.Logf("raft-test: node %d: FSM already restored %d snapshots", i, current)
-		return
-	}
+	// Secondly poll the wrapper to check if the FSM has reached the
+	// desired restore count (this can happen if it startedt before we
+	// could set up the hook).
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			if current := c.fsmsWatcher.RestoreCount(i); current >= n {
+				c.t.Logf("raft-test: node %d: FSM already restored %d snapshots", i, current)
+				close(done)
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
 
 	// Wait for the hook to fire the channel
 	select {
@@ -298,8 +427,8 @@ func (c *Control) WaitRestore(r *raft.Raft, n int, timeout time.Duration) {
 	}
 }
 
-// Return the index of the given raft instance
-func (c *Control) index(raft *raft.Raft) int {
+// Index returns the index of the given raft instance.
+func (c *Control) Index(raft *raft.Raft) int {
 	helper, ok := c.t.(testingHelper)
 	if ok {
 		helper.Helper()

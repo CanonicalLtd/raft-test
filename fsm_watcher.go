@@ -71,7 +71,7 @@ func (w *fsmsWatcher) ApplyIndex(i int) uint64 {
 }
 
 // SnapshotHook sets a hook that gets invoked when the FSM with the given index
-// has performed a snapshot.
+// has performed a snapshot and has finished to persist it.
 func (w *fsmsWatcher) SnapshotHook(i int, hook func()) {
 	wrapper := w.wrappers[i]
 
@@ -153,15 +153,18 @@ func (f *fsmWrapper) Apply(log *raft.Log) interface{} {
 // Snapshot always return a dummy snapshot and no error without doing
 // anything.
 func (f *fsmWrapper) Snapshot() (raft.FSMSnapshot, error) {
-	f.mu.Lock()
-	f.snapshotCount++
+	f.mu.RLock()
 	hook := f.snapshotHook
-	f.mu.Unlock()
+	f.mu.RUnlock()
 
 	snapshot, err := f.fsm.Snapshot()
 
-	if hook != nil {
-		hook()
+	if snapshot != nil {
+		snapshot = &fsmSnapshotWrapper{
+			wrapper:  f,
+			snapshot: snapshot,
+			hook:     hook,
+		}
 	}
 
 	return snapshot, err
@@ -183,3 +186,24 @@ func (f *fsmWrapper) Restore(reader io.ReadCloser) error {
 
 	return err
 }
+
+type fsmSnapshotWrapper struct {
+	wrapper  *fsmWrapper
+	snapshot raft.FSMSnapshot
+	hook     func()
+}
+
+func (s *fsmSnapshotWrapper) Persist(sink raft.SnapshotSink) error {
+	err := s.snapshot.Persist(sink)
+
+	s.wrapper.mu.Lock()
+	s.wrapper.snapshotCount++
+	s.wrapper.mu.Unlock()
+
+	if s.hook != nil {
+		s.hook()
+	}
+	return err
+}
+
+func (s *fsmSnapshotWrapper) Release() {}
