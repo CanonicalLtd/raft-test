@@ -26,7 +26,7 @@ import (
 // If the transports returned by the factory do not implement
 // LoopbackTransport, the Disconnect API won't work.
 func Transport(factory func(int) raft.Transport) Knob {
-	return func(nodes map[int]*node) {
+	return func(nodes []*node) {
 		for i, node := range nodes {
 			node.Transport = factory(i)
 		}

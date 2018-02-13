@@ -32,33 +32,36 @@ func TestFSMsWatcher_FSMs(t *testing.T) {
 }
 
 // The apply hook is invoked when a log is applied.
-func TestFSMsWatcher_ApplyHook(t *testing.T) {
-	fsms := FSMs(3)
-
-	watcher := newFSMsWatcher(fsms)
-
-	index := uint64(666)
-	watcher.ApplyHook(1, func(i uint64) {
-		index = i
-	})
-
-	watcher.FSMs()[1].Apply(newLog(2))
-
-	assert.Equal(t, uint64(2), index)
-
-	assert.Equal(t, uint64(0), watcher.ApplyIndex(0))
-	assert.Equal(t, uint64(2), watcher.ApplyIndex(1))
-	assert.Equal(t, uint64(0), watcher.ApplyIndex(2))
-}
-
-// The snapshot hook is invoked when a log is applied.
-func TestFSMsWatcher_SnapshotHook(t *testing.T) {
+func TestFSMsWatcher_BeforeApply(t *testing.T) {
 	fsms := FSMs(3)
 
 	watcher := newFSMsWatcher(fsms)
 
 	triggered := false
-	watcher.SnapshotHook(0, func() {
+	watcher.BeforeApply(1, 1, func() {
+		assert.Equal(t, uint64(0), watcher.AppliedIndex(1))
+		triggered = true
+	})
+
+	watcher.FSMs()[1].Apply(newLog(1))
+
+	assert.True(t, triggered)
+
+	assert.Equal(t, uint64(0), watcher.AppliedIndex(0))
+	assert.Equal(t, uint64(1), watcher.AppliedIndex(1))
+	assert.Equal(t, uint64(0), watcher.AppliedIndex(2))
+}
+
+// The snapshot hook is invoked when a log is applied.
+func TestFSMsWatcher_BeforeSnapshot(t *testing.T) {
+	fsms := FSMs(3)
+
+	watcher := newFSMsWatcher(fsms)
+
+	triggered := false
+
+	watcher.BeforeSnapshot(0, 1, func() {
+		assert.Equal(t, 0, watcher.SnapshotCount(0))
 		triggered = true
 	})
 
@@ -74,14 +77,15 @@ func TestFSMsWatcher_SnapshotHook(t *testing.T) {
 }
 
 // The restore hook is invoked when a log is applied.
-func TestFSMsWatcher_RestoreHook(t *testing.T) {
+func TestFSMsWatcher_BeforeRestore(t *testing.T) {
 	fsms := FSMs(3)
 
 	watcher := newFSMsWatcher(fsms)
 
 	triggered := false
 
-	watcher.RestoreHook(2, func() {
+	watcher.BeforeRestore(2, 1, func() {
+		assert.Equal(t, 0, watcher.RestoreCount(2))
 		triggered = true
 	})
 
@@ -94,30 +98,34 @@ func TestFSMsWatcher_RestoreHook(t *testing.T) {
 	assert.Equal(t, 1, watcher.RestoreCount(2))
 }
 
-// If an apply hook is set, it's invoked before applying a new log.
-func TestFSMWrapper_ApplyHook(t *testing.T) {
-	fsm := FSM()
-
-	wrapper := newFSMWrapper(fsm)
-
-	index := uint64(666)
-	wrapper.applyHook = func(i uint64) {
-		index = i
-	}
-
-	wrapper.Apply(newLog(1))
-	assert.Equal(t, uint64(1), index)
-}
-
-// If a snapshot hook is set, it's invoked before performing a snapshot.
-func TestFSMWrapper_SnapshotHook(t *testing.T) {
+// If an apply hook is set, it's invoked afer applying a new log.
+func TestFSMWrapper_AfterApply(t *testing.T) {
 	fsm := FSM()
 
 	wrapper := newFSMWrapper(fsm)
 
 	triggered := false
-	wrapper.snapshotHook = func() {
+
+	wrapper.afterApply[1] = func() {
 		triggered = true
+		assert.Equal(t, uint64(1), wrapper.applyIndex)
+	}
+
+	wrapper.Apply(newLog(1))
+	assert.True(t, triggered)
+}
+
+// If a snapshot hook is set, it's invoked before performing a snapshot.
+func TestFSMWrapper_AfterSnapshot(t *testing.T) {
+	fsm := FSM()
+
+	wrapper := newFSMWrapper(fsm)
+
+	triggered := false
+
+	wrapper.afterSnapshot[1] = func() {
+		triggered = true
+		assert.Equal(t, 1, wrapper.snapshotCount)
 	}
 
 	snapshot, err := wrapper.Snapshot()
@@ -127,19 +135,21 @@ func TestFSMWrapper_SnapshotHook(t *testing.T) {
 	assert.True(t, triggered, "hook not fired")
 }
 
-// If a restore hook is set, it's invoked before restoring the snapshot.
-func TestFSMWrapper_RestoreHook(t *testing.T) {
+// If an after restore hook is set, it's invoked after restoring the snapshot.
+func TestFSMWrapper_AfterRestore(t *testing.T) {
 	fsm := FSM()
 
 	wrapper := newFSMWrapper(fsm)
 
 	triggered := false
-	wrapper.restoreHook = func() {
+
+	wrapper.afterRestore[1] = func() {
 		triggered = true
+		assert.Equal(t, 1, wrapper.restoreCount)
 	}
 
 	wrapper.Restore(nil)
-	assert.True(t, triggered, "hook not fired")
+	assert.True(t, triggered)
 }
 
 func newLog(index uint64) *raft.Log {

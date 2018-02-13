@@ -24,7 +24,7 @@ import (
 
 // Config sets a hook for tweaking the raft configuration of individual nodes.
 func Config(f func(int, *raft.Config)) Knob {
-	return func(nodes map[int]*node) {
+	return func(nodes []*node) {
 		for i, node := range nodes {
 			f(i, node.Config)
 		}

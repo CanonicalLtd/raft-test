@@ -31,10 +31,10 @@ func Example() {
 	fsms := rafttest.FSMs(3)
 
 	// Create a cluster knob to tweak the raft configuration to perform
-	// a snapshot after about 50 millisecond.
+	// a snapshot after about 100 millisecond.
 	config := rafttest.Config(func(n int, config *raft.Config) {
-		config.SnapshotInterval = 50 * time.Millisecond
-		config.SnapshotThreshold = 7
+		config.SnapshotInterval = 100 * time.Millisecond
+		config.SnapshotThreshold = 8
 		config.TrailingLogs = 1
 		config.ElectionTimeout = 300 * time.Millisecond
 		config.HeartbeatTimeout = 250 * time.Millisecond
@@ -53,8 +53,11 @@ func Example() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if raft1.AppliedIndex() != 3 {
+		log.Fatal("expected for applied index to be 3")
+	}
 	for _, raft := range rafts {
-		control.WaitIndex(raft, 3, time.Second)
+		control.WaitIndex(raft, raft1.AppliedIndex(), time.Second)
 	}
 
 	// Get one of the two follower raft instances.
@@ -66,7 +69,7 @@ func Example() {
 	// Get the other follower raft instance.
 	raft3 := control.Other(raft1, raft2)
 
-	// Apply another few logs, leaving raft instance raft2 behind.
+	// Apply another 5 logs, leaving raft instance raft2 behind.
 	for i := 0; i < 5; i++ {
 		err := raft1.Apply([]byte{}, time.Second).Error()
 		if err != nil {
@@ -90,8 +93,7 @@ func Example() {
 	control.WaitRestore(raft2, 1, time.Second)
 
 	// Apply other logs an check that the disconnected node has caught
-	// up. It might be that raft1 lost leadership, in that case we retry
-	// with the next leader.
+	// up.
 	for i := 0; i < 5; i++ {
 		err := raft1.Apply([]byte{}, time.Second).Error()
 		if err != nil {
@@ -99,17 +101,8 @@ func Example() {
 		}
 	}
 
-	timer := time.After(time.Second)
-	for {
-		select {
-		case <-timer:
-			t.Fatalf("disconnected node did not catch up with logs")
-		default:
-		}
-		if raft2.AppliedIndex() >= 13 {
-			break
-		}
-	}
+	control.WaitIndex(raft2, 13, time.Second)
+
 	// Output:
 	// true
 	fmt.Println(raft2.AppliedIndex() == 13)
