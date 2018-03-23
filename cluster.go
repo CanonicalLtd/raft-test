@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/CanonicalLtd/raft-test/internal/raftext"
 	"github.com/hashicorp/raft"
 )
 
@@ -178,7 +179,7 @@ func newDefaultNode(t testing.TB, i int) *node {
 
 	// Use the node's index as its server address.
 	addr := strconv.Itoa(i)
-	_, transport := raft.NewInmemTransportWithTimeout(
+	_, transport := raftext.NewInmemTransportWithTimeout(
 		raft.ServerAddress(addr), Duration(50*time.Millisecond))
 
 	out := TestingWriter(t)
