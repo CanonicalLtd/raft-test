@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The Latency knobs tweaks the default raft timeouts.
+// The Latency knobs tweak the default raft timeouts.
 func TestCluster_Latency(t *testing.T) {
 	rafts, control := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Latency(1000.0))
 	defer control.Close()

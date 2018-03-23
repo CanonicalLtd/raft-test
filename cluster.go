@@ -17,27 +17,27 @@ package rafttest
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/CanonicalLtd/raft-test/core"
 	"github.com/hashicorp/raft"
 )
 
 // Cluster creates n raft nodes, one for each of the given FSMs, and returns a
-// Control object that can be used monitor and manipulate them.
+// Control object that can be used to observe and manipulate them.
 //
 // Each raft.Raft instance is created with sane test-oriented default
 // dependencies, which include:
 //
 // - very low configuration timeouts
 // - in-memory transports which are automatically connected to each other
-// - in-memory log stores
+// - in-memory log and stable stores
 // - in-memory snapshot stores
 //
-// All the created nodes will be part of the cluster and act as voting servers,
+// All created nodes will be part of the cluster and act as voting servers,
 // unless the Servers knob is used.
 //
 // If a GO_RAFT_TEST_LATENCY environment is found, the default configuration
@@ -53,7 +53,7 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Contr
 
 	// Create a set of default dependencies for each node.
 	n := len(fsms)
-	nodes := make(map[int]*node, n)
+	nodes := make([]*node, n)
 	for i := 0; i < n; i++ {
 		nodes[i] = newDefaultNode(t, i)
 	}
@@ -63,8 +63,14 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Contr
 		knob(nodes)
 	}
 
+	// Honor the GO_RAFT_TEST_LATENCY env var, if set.
+	scaleTimeouts(nodes)
+
 	// Create notification channels for all nodes.
 	notifyChs := createNotifyChs(t, nodes)
+
+	// Create log wrappers for all nodes.
+	logWrappers := createLogWrappers(nodes)
 
 	// Bootstrap the initial cluster configuration.
 	bootstrapCluster(t, nodes)
@@ -72,7 +78,10 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Contr
 	// Create a watcher for the given fsms.
 	fsmsWacher := newFSMsWatcher(fsms)
 
-	// Create a new watcher for the notification channels
+	// Create a watcher for the log stores.
+	logsWacher := newLogsWatcher(logWrappers)
+
+	// Create a watcher for the notification channels
 	notifyWatcher := newNotifyWatcher(notifyChs)
 
 	// Create a new network helper
@@ -94,6 +103,7 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Contr
 	control := &Control{
 		t:             t,
 		fsmsWatcher:   fsmsWacher,
+		logsWatcher:   logsWacher,
 		notifyWatcher: notifyWatcher,
 		network:       network,
 		rafts:         rafts,
@@ -104,7 +114,7 @@ func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Contr
 
 // Knob can be used to tweak the dependencies of test Raft nodes created with
 // Cluster() or Node().
-type Knob func(map[int]*node)
+type Knob func([]*node)
 
 // Shutdown all the given raft nodes and fail the test if any of them errors
 // out while doing so.
@@ -121,29 +131,25 @@ func Shutdown(t testing.TB, rafts []*raft.Raft) {
 		futures[i] = r.Shutdown()
 	}
 
-	// Expect the shutdown to happen within 5 seconds.
-	timeout := 5 * time.Second
+	// Expect the shutdown to happen within a second by default.
+	timeout := Duration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	// Watch for errors.
-	errors := make(chan error, 3)
+	errors := make([]chan error, len(rafts))
 	for i, future := range futures {
+		errors[i] = make(chan error)
 		go func(i int, future raft.Future) {
-			errors <- future.Error()
+			errors[i] <- future.Error()
 		}(i, future)
 	}
-
 	for i := range futures {
 		var err error
 		select {
-		case err = <-errors:
+		case err = <-errors[i]:
 		case <-ctx.Done():
-			// FIXME: If the raft instance has performed snapshots, it might have
-			// hit https://github.com/hashicorp/raft/issues/268 and hence
-			// be blocked. Don't fail the test in this case, but print a log message.
-			t.Logf("raft-test: node %d: blocked on shutdown", i)
-			break
+			t.Fatalf("raft-test: node %d: did not shutdown within %s", i, timeout)
 		}
 		if err != nil {
 			t.Fatalf("raft-test: node %d: shutdown error: %v", i, err)
@@ -172,28 +178,30 @@ func newDefaultNode(t testing.TB, i int) *node {
 
 	// Use the node's index as its server address.
 	addr := strconv.Itoa(i)
-	_, transport := core.NewInmemTransport(raft.ServerAddress(addr))
+	_, transport := raft.NewInmemTransportWithTimeout(
+		raft.ServerAddress(addr), Duration(50*time.Millisecond))
 
 	out := TestingWriter(t)
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(addr)
 	config.Logger = log.New(out, fmt.Sprintf("%s: ", addr), log.Ltime|log.Lmicroseconds)
 
-	config.HeartbeatTimeout = Duration(20 * time.Millisecond)
-	config.ElectionTimeout = Duration(20 * time.Millisecond)
-	config.CommitTimeout = Duration(1 * time.Millisecond)
-	config.LeaderLeaseTimeout = Duration(10 * time.Millisecond)
+	config.HeartbeatTimeout = 20 * time.Millisecond
+	config.ElectionTimeout = 20 * time.Millisecond
+	config.CommitTimeout = 1 * time.Millisecond
+	config.LeaderLeaseTimeout = 10 * time.Millisecond
 
-	options := &node{
+	store := raft.NewInmemStore()
+	node := &node{
 		Config:    config,
-		Logs:      raft.NewInmemStore(),
-		Stable:    raft.NewInmemStore(),
-		Snapshots: core.NewInmemSnapshotStore(),
+		Logs:      store,
+		Stable:    store,
+		Snapshots: raft.NewInmemSnapshotStore(),
 		Transport: transport,
 		Bootstrap: true,
 	}
 
-	return options
+	return node
 }
 
 // Convenience around raft.NewRaft for creating a new Raft instance using the
@@ -209,20 +217,33 @@ func newRaft(fsm raft.FSM, node *node) (*raft.Raft, error) {
 	)
 }
 
+// Scale the timeouts of the nodes to match GO_RAFT_TEST_LATENCY, is set.
+func scaleTimeouts(nodes []*node) {
+	for _, node := range nodes {
+		config := node.Config
+		config.HeartbeatTimeout = Duration(config.HeartbeatTimeout)
+		config.ElectionTimeout = Duration(config.ElectionTimeout)
+		config.CommitTimeout = Duration(config.CommitTimeout)
+		config.LeaderLeaseTimeout = Duration(config.LeaderLeaseTimeout)
+	}
+}
+
 // Bootstrap the cluster, by connecting the appropriate nodes to each other and
 // setting up their initial configuration.
-func bootstrapCluster(t testing.TB, nodes map[int]*node) {
+func bootstrapCluster(t testing.TB, nodes []*node) {
 	helper, ok := t.(testingHelper)
 	if ok {
 		helper.Helper()
 	}
 
+	// Figure out which nodes should be part of the initial configuration,
+	// and connect their transports to each other.
 	servers := make([]raft.Server, 0)
-	for i := 0; i < len(nodes); i++ {
-		node := nodes[i]
+	for i, node := range nodes {
 		if !node.Bootstrap {
 			// If the node is not initially part of the cluster,
 			// there's nothing to do.
+			t.Logf("raft-test: node %d: skip bootstrap (not part of initial configuration)", i)
 			continue
 		}
 		server := raft.Server{
@@ -234,7 +255,7 @@ func bootstrapCluster(t testing.TB, nodes map[int]*node) {
 		// Connect the node's transport to the transports of all other
 		// nodes that are initially part of the cluster.
 		for j, other := range nodes {
-			if other == node || !other.Bootstrap {
+			if j == i || !other.Bootstrap {
 				// This node is not part of the cluster, don't connect to it.
 				continue
 			}
@@ -247,9 +268,8 @@ func bootstrapCluster(t testing.TB, nodes map[int]*node) {
 		}
 	}
 
-	configuration := raft.Configuration{}
-	configuration.Servers = servers
-
+	// Create the initial cluster configuration.
+	configuration := raft.Configuration{Servers: servers}
 	for i := 0; i < len(nodes); i++ {
 		node := nodes[i]
 		if !node.Bootstrap {
@@ -272,7 +292,7 @@ func bootstrapCluster(t testing.TB, nodes map[int]*node) {
 }
 
 // Create notification channels for all nodes.
-func createNotifyChs(t testing.TB, nodes map[int]*node) []chan bool {
+func createNotifyChs(t testing.TB, nodes []*node) []chan bool {
 	helper, ok := t.(testingHelper)
 	if ok {
 		helper.Helper()
@@ -292,8 +312,18 @@ func createNotifyChs(t testing.TB, nodes map[int]*node) []chan bool {
 	return notifyChs
 }
 
+// Wrap log stores with an observable logWrapper.
+func createLogWrappers(nodes []*node) []*logWrapper {
+	wrappers := make([]*logWrapper, len(nodes))
+	for i, node := range nodes {
+		wrappers[i] = newLogWrapper(node.Logs)
+		node.Logs = wrappers[i]
+	}
+	return wrappers
+}
+
 // Detect loopback transports from nodes that have them.
-func detectLoobackTransports(t testing.TB, nodes map[int]*node) []raft.LoopbackTransport {
+func detectLoobackTransports(t testing.TB, nodes []*node) []raft.LoopbackTransport {
 	helper, ok := t.(testingHelper)
 	if ok {
 		helper.Helper()
@@ -306,11 +336,33 @@ func detectLoobackTransports(t testing.TB, nodes map[int]*node) []raft.LoopbackT
 			// Non-loopback transports are ignored. If the user
 			// tries to disconnect them the test will fail at that
 			// time.
-			t.Logf("raft-test: node %d: warning transport does not implement LoopbackTransport", i)
+			t.Logf("raft-test: node %d: warning: transport does not implement LoopbackTransport", i)
 			continue
 		}
 		transports[i] = loopback
 	}
 
 	return transports
+}
+
+// TestingWriter returns an io.Writer that forwards the stream it receives to
+// the Logf function of the given testing instance.
+func TestingWriter(t testing.TB) io.Writer {
+	return &testingWriter{t: t}
+}
+
+// Implement io.Writer and forward what it receives to a
+// t.Testing logger.
+type testingWriter struct {
+	t testing.TB
+}
+
+func (w *testingWriter) Write(p []byte) (n int, err error) {
+	w.t.Logf(string(p))
+	return len(p), nil
+}
+
+// For compatibility with Go <1.9
+type testingHelper interface {
+	Helper()
 }

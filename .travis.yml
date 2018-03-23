@@ -1,6 +1,8 @@
 language: go
 
 before_install:
+  - mkdir -p $GOPATH/src/github.com/hashicorp/
+  - git clone -b assorted-fixes https://github.com/freeekanayaka/raft.git $GOPATH/src/github.com/hashicorp/raft
   - go get github.com/mattn/goveralls
   - go get github.com/golang/lint/golint
   - go get github.com/tsenart/deadcode
@@ -13,5 +15,5 @@ script:
   - $HOME/gopath/bin/goveralls -v -service=travis-ci -flags -test.timeout -flags 15s
 
 go:
-  - 1.8
-  - 1.9
+  - "1.9"
+  - "1.10"

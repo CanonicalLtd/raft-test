@@ -22,7 +22,7 @@ import (
 // Receive leadershipChange notifications whenever the leadership status of a
 // node in the cluster changes.
 //
-// It's essentially a "demultiplexer" of the various Config.NotifyCh attached
+// It's essentially a "demultiplexer" of the Config.NotifyCh channels attached
 // to the various nodes.
 type notifyWatcher struct {
 	cancel    context.CancelFunc
@@ -61,7 +61,7 @@ func (w *notifyWatcher) Next(ctx context.Context) *leadershipChange {
 	}
 }
 
-// Start watching all the notify channles and feeds notification to our
+// Start watching all the notify channels and feed notification to our
 // "demultiplexer" channel
 //
 // The loop will be terminated once the context is done.

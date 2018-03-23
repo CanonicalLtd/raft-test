@@ -49,19 +49,30 @@ func (w *fsmsWatcher) FSMs() []raft.FSM {
 	return fsms
 }
 
-// ApplyHook sets a hook that gets invoked when the FSM with the given index is
-// about to apply a new log entry.
-func (w *fsmsWatcher) ApplyHook(i int, hook func(uint64)) {
+// BeforeApply sets a hook that gets invoked when the FSM with the given index is
+// about to apply the log command with the given index.
+func (w *fsmsWatcher) BeforeApply(i int, index uint64, hook func()) {
 	wrapper := w.wrappers[i]
 
 	wrapper.mu.Lock()
 	defer wrapper.mu.Unlock()
 
-	wrapper.applyHook = hook
+	wrapper.beforeApply[index] = hook
 }
 
-// ApplyIndex returns the index of the last log applied by the given FSM.
-func (w *fsmsWatcher) ApplyIndex(i int) uint64 {
+// AfterApply sets a hook that gets invoked when the FSM with the given index has
+// applied a new log entry.
+func (w *fsmsWatcher) AfterApply(i int, index uint64, hook func()) {
+	wrapper := w.wrappers[i]
+
+	wrapper.mu.Lock()
+	defer wrapper.mu.Unlock()
+
+	wrapper.afterApply[index] = hook
+}
+
+// AppliedIndex returns the index of the last log applied by the given FSM.
+func (w *fsmsWatcher) AppliedIndex(i int) uint64 {
 	wrapper := w.wrappers[i]
 
 	wrapper.mu.RLock()
@@ -70,15 +81,26 @@ func (w *fsmsWatcher) ApplyIndex(i int) uint64 {
 	return wrapper.applyIndex
 }
 
-// SnapshotHook sets a hook that gets invoked when the FSM with the given index
-// has performed a snapshot and has finished to persist it.
-func (w *fsmsWatcher) SnapshotHook(i int, hook func()) {
+// BeforeSnapshot sets a hook that gets invoked when the FSM with the given
+// index is about to perform the n'th snapshot.
+func (w *fsmsWatcher) BeforeSnapshot(i int, n int, hook func()) {
 	wrapper := w.wrappers[i]
 
 	wrapper.mu.Lock()
 	defer wrapper.mu.Unlock()
 
-	wrapper.snapshotHook = hook
+	wrapper.beforeSnapshot[n] = hook
+}
+
+// AfterSnapshot sets a hook that gets invoked when the FSM with the given
+// index has performed the n'th snapshot and has finished to persist it.
+func (w *fsmsWatcher) AfterSnapshot(i int, n int, hook func()) {
+	wrapper := w.wrappers[i]
+
+	wrapper.mu.Lock()
+	defer wrapper.mu.Unlock()
+
+	wrapper.afterSnapshot[n] = hook
 }
 
 // SnapshotCount returns the number of snapshots performed by the given FSM.
@@ -86,20 +108,32 @@ func (w *fsmsWatcher) SnapshotCount(i int) int {
 	wrapper := w.wrappers[i]
 
 	wrapper.mu.RLock()
+
 	defer wrapper.mu.RUnlock()
 
 	return wrapper.snapshotCount
 }
 
-// RestoreHook sets a hook that gets invoked when the FSM with the given index
-// has restored a snapshot.
-func (w *fsmsWatcher) RestoreHook(i int, hook func()) {
+// BeforeRestore sets a hook that gets invoked when the FSM with the given index is
+// about to restore the n'th snapshot.
+func (w *fsmsWatcher) BeforeRestore(i int, n int, hook func()) {
 	wrapper := w.wrappers[i]
 
 	wrapper.mu.Lock()
 	defer wrapper.mu.Unlock()
 
-	wrapper.restoreHook = hook
+	wrapper.beforeRestore[n] = hook
+}
+
+// AfterRestore sets a hook that gets invoked when the FSM with the given is
+// has restored the n'th snapshot.
+func (w *fsmsWatcher) AfterRestore(i int, n int, hook func()) {
+	wrapper := w.wrappers[i]
+
+	wrapper.mu.Lock()
+	defer wrapper.mu.Unlock()
+
+	wrapper.afterRestore[n] = hook
 }
 
 // RestoreCount returns the number of restores performed by the given FSM.
@@ -116,11 +150,13 @@ func (w *fsmsWatcher) RestoreCount(i int) int {
 type fsmWrapper struct {
 	fsm raft.FSM // Wrapped FSM
 
-	// Hooks that are invoked when an FSM operation is about to be
-	// performed.
-	applyHook    func(uint64)
-	snapshotHook func()
-	restoreHook  func()
+	// Hooks that are invoked upon FSM operations.
+	beforeApply    map[uint64]func()
+	afterApply     map[uint64]func()
+	beforeSnapshot map[int]func()
+	afterSnapshot  map[int]func()
+	beforeRestore  map[int]func()
+	afterRestore   map[int]func()
 
 	// Trackers for the operations performed so far by the FSM.
 	applyIndex    uint64
@@ -133,29 +169,50 @@ type fsmWrapper struct {
 
 func newFSMWrapper(fsm raft.FSM) *fsmWrapper {
 	return &fsmWrapper{
-		fsm: fsm,
+		fsm:            fsm,
+		beforeApply:    make(map[uint64]func()),
+		afterApply:     make(map[uint64]func()),
+		beforeSnapshot: make(map[int]func()),
+		afterSnapshot:  make(map[int]func()),
+		beforeRestore:  make(map[int]func()),
+		afterRestore:   make(map[int]func()),
 	}
 }
 
 func (f *fsmWrapper) Apply(log *raft.Log) interface{} {
-	f.mu.Lock()
-	f.applyIndex = log.Index
-	hook := f.applyHook
-	f.mu.Unlock()
+	f.mu.RLock()
+	before := f.beforeApply[log.Index]
+	f.mu.RUnlock()
 
-	if hook != nil {
-		hook(log.Index)
+	if before != nil {
+		before()
 	}
 
-	return f.fsm.Apply(log)
+	result := f.fsm.Apply(log)
+
+	f.mu.Lock()
+	f.applyIndex = log.Index
+	after := f.afterApply[log.Index]
+	f.mu.Unlock()
+
+	if after != nil {
+		after()
+	}
+
+	return result
 }
 
 // Snapshot always return a dummy snapshot and no error without doing
 // anything.
 func (f *fsmWrapper) Snapshot() (raft.FSMSnapshot, error) {
 	f.mu.RLock()
-	hook := f.snapshotHook
+	n := f.snapshotCount + 1
+	before := f.beforeSnapshot[n]
 	f.mu.RUnlock()
+
+	if before != nil {
+		before()
+	}
 
 	snapshot, err := f.fsm.Snapshot()
 
@@ -163,7 +220,6 @@ func (f *fsmWrapper) Snapshot() (raft.FSMSnapshot, error) {
 		snapshot = &fsmSnapshotWrapper{
 			wrapper:  f,
 			snapshot: snapshot,
-			hook:     hook,
 		}
 	}
 
@@ -173,15 +229,24 @@ func (f *fsmWrapper) Snapshot() (raft.FSMSnapshot, error) {
 // Restore always return a nil error without reading anything from
 // the reader.
 func (f *fsmWrapper) Restore(reader io.ReadCloser) error {
-	f.mu.Lock()
-	f.restoreCount++
-	hook := f.restoreHook
-	f.mu.Unlock()
+	f.mu.RLock()
+	n := f.restoreCount + 1
+	before := f.beforeRestore[n]
+	f.mu.RUnlock()
+
+	if before != nil {
+		before()
+	}
 
 	err := f.fsm.Restore(reader)
 
-	if hook != nil {
-		hook()
+	f.mu.Lock()
+	f.restoreCount = n
+	after := f.afterRestore[n]
+	f.mu.Unlock()
+
+	if after != nil {
+		after()
 	}
 
 	return err
@@ -190,19 +255,21 @@ func (f *fsmWrapper) Restore(reader io.ReadCloser) error {
 type fsmSnapshotWrapper struct {
 	wrapper  *fsmWrapper
 	snapshot raft.FSMSnapshot
-	hook     func()
 }
 
 func (s *fsmSnapshotWrapper) Persist(sink raft.SnapshotSink) error {
 	err := s.snapshot.Persist(sink)
 
 	s.wrapper.mu.Lock()
-	s.wrapper.snapshotCount++
+	n := s.wrapper.snapshotCount + 1
+	after := s.wrapper.afterSnapshot[n]
+	s.wrapper.snapshotCount = n
 	s.wrapper.mu.Unlock()
 
-	if s.hook != nil {
-		s.hook()
+	if after != nil {
+		after()
 	}
+
 	return err
 }
 

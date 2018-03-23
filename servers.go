@@ -20,7 +20,7 @@ package rafttest
 // If this knob is not used, the default is to have all nodes be part of the
 // cluster.
 func Servers(indexes ...int) Knob {
-	return func(nodes map[int]*node) {
+	return func(nodes []*node) {
 		for _, node := range nodes {
 			node.Bootstrap = false
 		}
