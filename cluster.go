@@ -47,10 +47,7 @@ import (
 // values unchanged. A value greater than 1.0 increases the default timeouts by
 // that factor. See also the Duration and Latency helpers.
 func Cluster(t testing.TB, fsms []raft.FSM, knobs ...Knob) ([]*raft.Raft, *Control) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	// Create a set of default dependencies for each node.
 	n := len(fsms)
@@ -120,10 +117,7 @@ type Knob func([]*node)
 // Shutdown all the given raft nodes and fail the test if any of them errors
 // out while doing so.
 func Shutdown(t testing.TB, rafts []*raft.Raft) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	// Trigger the shutdown on all the nodes.
 	futures := make([]raft.Future, len(rafts))
@@ -172,10 +166,7 @@ type node struct {
 
 // Create default dependencies for a single raft node.
 func newDefaultNode(t testing.TB, i int) *node {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	// Use the node's index as its server address.
 	addr := strconv.Itoa(i)
@@ -232,10 +223,7 @@ func scaleTimeouts(nodes []*node) {
 // Bootstrap the cluster, by connecting the appropriate nodes to each other and
 // setting up their initial configuration.
 func bootstrapCluster(t testing.TB, nodes []*node) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	// Figure out which nodes should be part of the initial configuration,
 	// and connect their transports to each other.
@@ -294,10 +282,7 @@ func bootstrapCluster(t testing.TB, nodes []*node) {
 
 // Create notification channels for all nodes.
 func createNotifyChs(t testing.TB, nodes []*node) []chan bool {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	notifyChs := make([]chan bool, len(nodes))
 	for i, node := range nodes {
@@ -325,10 +310,7 @@ func createLogWrappers(nodes []*node) []*logWrapper {
 
 // Detect loopback transports from nodes that have them.
 func detectLoobackTransports(t testing.TB, nodes []*node) []raft.LoopbackTransport {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	transports := make([]raft.LoopbackTransport, len(nodes))
 	for i, node := range nodes {
@@ -361,9 +343,4 @@ type testingWriter struct {
 func (w *testingWriter) Write(p []byte) (n int, err error) {
 	w.t.Logf(string(p))
 	return len(p), nil
-}
-
-// For compatibility with Go <1.9
-type testingHelper interface {
-	Helper()
 }

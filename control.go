@@ -369,10 +369,7 @@ func WaitLeader(t testing.TB, raft *raft.Raft, timeout time.Duration) {
 }
 
 func waitLeader(ctx context.Context, t testing.TB, raft *raft.Raft) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	check := func() bool {
 		return raft.Leader() != ""
@@ -383,10 +380,7 @@ func waitLeader(ctx context.Context, t testing.TB, raft *raft.Raft) {
 // Poll the given function at the given internval, until it returns true, or
 // the given context expires.
 func wait(ctx context.Context, t testing.TB, f func() bool, interval time.Duration, message string) {
-	helper, ok := t.(testingHelper)
-	if ok {
-		helper.Helper()
-	}
+	t.Helper()
 
 	start := time.Now()
 	for {
