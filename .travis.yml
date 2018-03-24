@@ -12,7 +12,7 @@ script:
   - go vet
   - golint
   - deadcode
-  - $HOME/gopath/bin/goveralls -v -service=travis-ci -flags -test.timeout -flags 15s
+  - GO_RAFT_TEST_LATENCY=2.0 $HOME/gopath/bin/goveralls -service=travis-ci -flags -test.timeout -flags 15s
 
 go:
   - "1.9"
