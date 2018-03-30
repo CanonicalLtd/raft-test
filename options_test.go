@@ -14,17 +14,8 @@
 
 package rafttest_test
 
-import (
-	"os"
-	"testing"
-	"time"
-
-	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
-	"github.com/stretchr/testify/assert"
-)
-
-// The Latency knobs tweak the default raft timeouts.
+/*
+// The Latency options tweak the default raft timeouts.
 func TestCluster_Latency(t *testing.T) {
 	rafts, control := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.Latency(1000.0))
 	defer control.Close()
@@ -74,3 +65,22 @@ func TestCluster_LatencyEnvInvalid(t *testing.T) {
 
 	assert.PanicsWithValue(t, "invalid value 'foo' for GO_RAFT_TEST_LATENCY", f)
 }
+*/
+
+/*
+// If the Servers option is used, only the given nodes are connected and
+// bootstrapped.
+func TestServers(t *testing.T) {
+	fsms := rafttest.FSMs(3)
+	servers := rafttest.Servers(0)
+	rafts, control := rafttest.Cluster(t, fsms, servers)
+	defer control.Close()
+
+	assert.Equal(t, rafts[0], control.LeadershipAcquired(time.Second))
+
+	assert.Equal(t, raft.Leader, rafts[0].State())
+	future := rafts[0].GetConfiguration()
+	require.NoError(t, future.Error())
+	assert.Len(t, future.Configuration().Servers, 1)
+}
+*/

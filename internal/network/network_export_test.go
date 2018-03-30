@@ -12,23 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rafttest
+package network
 
-import (
-	"github.com/hashicorp/raft"
-)
+import "github.com/hashicorp/raft"
 
-// Transport can be used to create custom transports.
-//
-// The given function takes a node index as argument and returns the Transport
-// that the node should use.
-//
-// If the transports returned by the factory do not implement
-// LoopbackTransport, the Disconnect API won't work.
-func Transport(factory func(int) raft.Transport) Knob {
-	return func(nodes []*node) {
-		for i, node := range nodes {
-			node.Transport = factory(i)
-		}
-	}
+// Return the transport wrapper of the given server.
+func (n *Network) Transport(id raft.ServerID) raft.Transport {
+	return n.transports[id]
 }
