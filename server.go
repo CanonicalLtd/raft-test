@@ -14,18 +14,23 @@
 
 package rafttest
 
-// Servers can be used to indicate which nodes should be initially part of the
-// created cluster.
+import (
+	"testing"
+
+	"github.com/hashicorp/raft"
+)
+
+// Server is a convenience for creating a cluster with a single raft.Raft server
+// that immediately be elected as leader.
 //
-// If this knob is not used, the default is to have all nodes be part of the
-// cluster.
-func Servers(indexes ...int) Knob {
-	return func(nodes []*node) {
-		for _, node := range nodes {
-			node.Bootstrap = false
-		}
-		for _, index := range indexes {
-			nodes[index].Bootstrap = true
-		}
-	}
+// The default network address of a test node is "0".
+//
+// Dependencies can be replaced or mutated using the various options.
+func Server(t *testing.T, fsm raft.FSM, options ...Option) (*raft.Raft, func()) {
+	fsms := []raft.FSM{fsm}
+
+	rafts, control := Cluster(t, fsms, options...)
+	control.Elect("0")
+
+	return rafts["0"], control.Close
 }

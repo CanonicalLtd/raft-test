@@ -12,35 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rafttest
+package rafttest_test
 
 import (
 	"testing"
+	"time"
 
+	"github.com/CanonicalLtd/raft-test"
 	"github.com/hashicorp/raft"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// The before store-logs hook is invoked before a log is stored.
-func TestLogsWatcher_BeforeStoreLog(t *testing.T) {
-	store := raft.NewInmemStore()
-	wrapper := newLogWrapper(store)
-	watcher := newLogsWatcher([]*logWrapper{wrapper})
+func TestServer_StartAndShutdown(t *testing.T) {
+	r, cleanup := rafttest.Server(t, rafttest.FSM())
+	defer cleanup()
 
-	triggered := false
-	watcher.BeforeStoreLog(0, 1, func() {
-		index, err := store.FirstIndex()
-		require.NoError(t, err)
-		assert.Equal(t, uint64(0), index)
-		triggered = true
-	})
-
-	wrapper.StoreLog(&raft.Log{Index: 1})
-
-	assert.True(t, triggered)
-
-	index, err := store.FirstIndex()
-	require.NoError(t, err)
-	assert.Equal(t, uint64(1), index)
+	assert.Equal(t, raft.Leader, r.State())
+	assert.Equal(t, raft.ServerAddress("0"), r.Leader())
+	assert.NoError(t, r.Apply([]byte{}, time.Second).Error())
 }

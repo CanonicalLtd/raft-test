@@ -12,22 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rafttest_test
+package event_test
 
 import (
 	"testing"
-	"time"
 
-	"github.com/CanonicalLtd/raft-test"
-	"github.com/hashicorp/raft"
+	"github.com/CanonicalLtd/raft-test/internal/event"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNode_StartAndShutdown(t *testing.T) {
-	r, cleanup := rafttest.Node(t, rafttest.FSM())
-	defer cleanup()
-
-	assert.Equal(t, raft.Leader, r.State())
-	assert.Equal(t, raft.ServerAddress("0"), r.Leader())
-	assert.NoError(t, r.Apply([]byte{}, time.Second).Error())
+func TestEvent(t *testing.T) {
+	e := event.New()
+	handled := false
+	go func() {
+		<-e.Watch()
+		handled = true
+		e.Ack()
+	}()
+	e.Fire()
+	e.Block()
+	assert.True(t, handled)
 }
