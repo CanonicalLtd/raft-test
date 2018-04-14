@@ -38,6 +38,10 @@ type notifier struct {
 	// be used both for notifying that leadership was acquired.
 	futureCh chan *Future
 
+	// Channel used to tell the notification loop to ignore any
+	// notification received from the notifyCh.
+	ignoreCh chan struct{}
+
 	// Stop observing leadership changes when this channel gets closed.
 	shutdownCh chan struct{}
 }
@@ -49,10 +53,16 @@ func newNotifier(logger *log.Logger, id raft.ServerID, notifyCh chan bool) *noti
 		id:         id,
 		notifyCh:   notifyCh,
 		futureCh:   make(chan *Future),
+		ignoreCh:   make(chan struct{}),
 		shutdownCh: make(chan struct{}),
 	}
 	go observer.start()
 	return observer
+}
+
+// Ignore any notifications received on the notifyCh.
+func (n *notifier) Ignore() {
+	close(n.ignoreCh)
 }
 
 // Close stops observing leadership changes.
@@ -94,6 +104,16 @@ func (n *notifier) start() {
 			}
 			future = f
 		case acquired := <-n.notifyCh:
+			ignore := false
+			select {
+			case <-n.ignoreCh:
+				// Just drop the notification on the floor.
+				ignore = true
+			default:
+			}
+			if ignore {
+				break
+			}
 			if future == nil {
 				panic(fmt.Sprintf("server %s: unexpected leadership change", n.id))
 			}

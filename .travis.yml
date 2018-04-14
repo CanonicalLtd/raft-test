@@ -14,7 +14,7 @@ script:
   - golint
   - deadcode
   - project=github.com/CanonicalLtd/raft-test
-  - GO_RAFT_TEST_LATENCY=2.0 $GOPATH/bin/overalls -project $project -covermode=count -- -timeout 60s
+  - GO_RAFT_TEST_LATENCY=5.0 $GOPATH/bin/overalls -project $project -covermode=count -- -timeout 120s
   - $GOPATH/bin/goveralls -coverprofile overalls.coverprofile -service=travis-ci
 
 go:

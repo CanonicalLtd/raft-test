@@ -57,6 +57,14 @@ func NewTracker(logger *log.Logger) *Tracker {
 	}
 }
 
+// Ignore stops propagating leadership change notifications, which will be
+// simply dropped on the floor. Should be called before the final Close().
+func (t *Tracker) Ignore() {
+	for _, observer := range t.observers {
+		observer.Ignore()
+	}
+}
+
 // Close stops watching for leadership changes in the cluster.
 func (t *Tracker) Close() {
 	for _, observer := range t.observers {

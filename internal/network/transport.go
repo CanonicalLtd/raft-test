@@ -127,6 +127,11 @@ func (t *eventTransport) AppendEntries(
 		return err
 	}
 
+	// Check for a newer term, stop running
+	if resp.Term > args.Term {
+		t.logger.Printf("[DEBUG] raft-test: server %s: transport: append to %s: newer term", t.id, id)
+	}
+
 	peer.UpdateLogs(args.Entries)
 
 	if faulty && t.schedule.IsEnqueueFault() {
@@ -175,10 +180,16 @@ func (t *eventTransport) DecodePeer(data []byte) raft.ServerAddress {
 // SetHeartbeatHandler is used to setup a heartbeat handler
 // as a fast-pass. This is to avoid head-of-line blocking from
 // disk IO. If a Transport does not support this, it can simply
-
 // ignore the call, and push the heartbeat onto the Consumer channel.
 func (t *eventTransport) SetHeartbeatHandler(cb func(rpc raft.RPC)) {
 	t.trans.SetHeartbeatHandler(cb)
+}
+
+func (t *eventTransport) Close() error {
+	if closer, ok := t.trans.(raft.WithClose); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 // AddPeer adds a new transport as peer of this transport. Once the other
