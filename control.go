@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -57,7 +58,16 @@ type Control struct {
 func (c *Control) Close() {
 	c.logger.Printf("[DEBUG] raft-test: close: start")
 
+	// First tell the election tracker that we don't care anymore about
+	// notifications. Any value received from the NotifyCh's will be dropped
+	// on the floor.
+	c.election.Ignore()
+
+	// Now shutdown the servers.
 	c.shutdownServers()
+
+	// Finally shutdown the election tracker since nothing will be
+	// sending to NotifyCh's.
 	c.election.Close()
 
 	c.logger.Printf("[DEBUG] raft-test: close: done")
@@ -68,6 +78,8 @@ func (c *Control) Close() {
 // When calling this method there must be no leader in the cluster and server
 // transports must all be disconnected from eacher.
 func (c *Control) Elect(id raft.ServerID) *Term {
+	c.t.Helper()
+
 	c.logger.Printf("[DEBUG] raft-test: elect: start (server %s)", id)
 
 	// Wait for the current leader (if any) to be fully deposed.
@@ -195,12 +207,12 @@ func (c *Control) shutdownServers() {
 	// Trigger the shutdown on all the nodes.
 	futures := make(map[raft.ServerID]raft.Future)
 	for id, r := range c.servers {
-		c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown", id)
+		c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown start", id)
 		futures[id] = r.Shutdown()
 	}
 
 	// Expect the shutdown to happen within a second by default.
-	timeout := Duration(time.Second)
+	timeout := Duration(2 * time.Second)
 	wg := sync.WaitGroup{}
 	wg.Add(len(c.servers))
 
@@ -214,6 +226,7 @@ func (c *Control) shutdownServers() {
 		go func(id raft.ServerID, future raft.Future) {
 			select {
 			case errors[id] <- future.Error():
+				c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)
 			case <-timer:
 			}
 			wg.Done()
@@ -229,7 +242,11 @@ func (c *Control) shutdownServers() {
 				failed = true
 			}
 		default:
+			buf := make([]byte, 1<<16)
+			n := runtime.Stack(buf, true)
+
 			c.t.Errorf("raft-test: close: error: server %s: did not shutdown within %s", id, timeout)
+			c.t.Errorf("\n\t%s", buf[:n])
 			failed = true
 		}
 	}
@@ -382,28 +399,6 @@ func (c *Control) snapshotUponEvent(event *event.Event, id raft.ServerID) {
 
 	r := c.servers[id]
 	c.snapshotFuture = r.Snapshot()
-
-	event.Ack()
-}
-
-// Disconnect the server with the given ID when the given event fires.
-func (c *Control) disconnectUponEvent(event *event.Event, id, follower raft.ServerID) {
-	<-event.Watch()
-
-	c.logger.Printf("[DEBUG] raft-test: server %s: control: disconnect %s", id, follower)
-
-	c.network.Disconnect(id, follower)
-
-	event.Ack()
-}
-
-// Reconnect the server with the given ID when the given event fires.
-func (c *Control) reconnectUponEvent(event *event.Event, id, follower raft.ServerID) {
-	<-event.Watch()
-
-	c.logger.Printf("[DEBUG] raft-test: server %s: control: reconnect %s", id, follower)
-
-	c.network.Reconnect(id, follower)
 
 	event.Ack()
 }

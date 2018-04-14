@@ -210,14 +210,18 @@ func TestControl_RestoreAfterDisconnection(t *testing.T) {
 	defer control.Close()
 
 	term := control.Elect("0")
-	term.When().Command(1).Committed().Disconnect("1")
 	term.When().Command(4).Committed().Snapshot()
-	term.When().Command(5).Committed().Reconnect("1")
 
 	r := rafts["0"]
 	for i := 0; i < 6; i++ {
 		err := r.Apply([]byte{}, time.Second).Error()
 		require.NoError(t, err)
+		if i == 0 {
+			term.Disconnect("1")
+		}
+		if i == 4 {
+			term.Reconnect("1")
+		}
 	}
 
 	control.Barrier()

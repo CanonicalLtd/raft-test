@@ -98,17 +98,9 @@ func ExampleControl_Snapshots() {
 	// Elect the first server as leader
 	term := control.Elect("0")
 
-	// Set up a follower to disconnect after the first FSM command
-	// log is committed.
-	term.When().Command(1).Committed().Disconnect("1")
-
 	// Set up the leader to take a snapshot after committing the fifth FSM
 	// command log.
 	term.When().Command(4).Committed().Snapshot()
-
-	// Set up the disconnected follower to reconnect after the fifths FSM
-	// command log is committed.
-	term.When().Command(5).Committed().Reconnect("1")
 
 	// The raft server with server ID "0" is now the leader.
 	r := rafts["0"]
@@ -118,6 +110,9 @@ func ExampleControl_Snapshots() {
 	for i := 0; i < 4; i++ {
 		if err := r.Apply([]byte{}, time.Second).Error(); err != nil {
 			log.Fatal("failed to apply first FSM command log", err)
+		}
+		if i == 0 {
+			term.Disconnect("1")
 		}
 	}
 
@@ -129,6 +124,7 @@ func ExampleControl_Snapshots() {
 	if err := r.Apply([]byte{}, time.Second).Error(); err != nil {
 		log.Fatal("failed to apply first FSM command log", err)
 	}
+	term.Reconnect("1")
 
 	// Wait for the cluster to settle, in particular for all FSMs to catch
 	// up (the disconnected follower will restore from the snapshot).

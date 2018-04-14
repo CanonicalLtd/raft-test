@@ -27,6 +27,9 @@ type Term struct {
 	id         raft.ServerID
 	leadership *election.Leadership
 	events     []*Event
+
+	// Server ID of a follower that has been disconnect.
+	disconnected raft.ServerID
 }
 
 // When can be used to schedule a certain action when a certain expected
@@ -36,28 +39,70 @@ func (t *Term) When() *Event {
 	t.control.t.Helper()
 
 	event := &Event{
-		control:    t.control,
-		id:         t.id,
-		leadership: t.leadership,
+		term: t,
 	}
 
 	t.events = append(t.events, event)
 	return event
 }
 
-// ConnectAllServers connect all servers to each other after election.
-//
-// This will prevent using When().
-func (t *Term) ConnectAllServers() {
-	// TODO: check that we're not using When()
-	//t.control.network.
+// Disconnect a follower, which will stop receiving RPCs.
+func (t *Term) Disconnect(id raft.ServerID) {
+	t.control.t.Helper()
+
+	if t.disconnected != "" {
+		t.control.t.Fatalf("raft-test: term: disconnecting more than one server is not supported")
+	}
+
+	if id == t.id {
+		t.control.t.Fatalf("raft-test: term: disconnect error: server %s is the leader", t.id)
+	}
+
+	t.control.logger.Printf("[DEBUG] raft-test: term: disconnect %s", id)
+
+	t.disconnected = id
+	t.control.network.Disconnect(t.id, id)
+}
+
+// Reconnect a previously disconnected follower.
+func (t *Term) Reconnect(id raft.ServerID) {
+	t.control.t.Helper()
+
+	if id != t.disconnected {
+		t.control.t.Fatalf("raft-test: term: reconnect error: server %s was not disconnected", id)
+	}
+
+	// Reconnecting a server might end up in a new election round, so we
+	// have to be prepared for that.
+	t.control.network.Reconnect(t.id, id)
+	if t.control.waitLeadershipPropagated(t.id, t.leadership) {
+		// Leadership was not lost and all followers are back
+		// on track.
+		return
+	}
+
+	// Leadership was lost, we must undergo a new election.
+	//
+	// FIXME: this prevents When() hooks to function properly. It's not a
+	// big deal at the moment, since Disconnect() is mainly used for
+	// snapshots, but it should be sorted.
+	term := t.control.Elect(t.id)
+	t.leadership = term.leadership
+}
+
+// Snapshot performs a snapshot on the given server.
+func (t *Term) Snapshot(id raft.ServerID) {
+	t.control.t.Helper()
+
+	r := t.control.servers[id]
+	if err := r.Snapshot().Error(); err != nil {
+		t.control.t.Fatalf("raft-test: term: snapshot error on server %s: %v", id, err)
+	}
 }
 
 // Event that is expected to happen during a Term.
 type Event struct {
-	control     *Control
-	id          raft.ServerID
-	leadership  *election.Leadership
+	term        *Term
 	isScheduled bool
 }
 
@@ -65,106 +110,94 @@ type Event struct {
 // on the leader raft instance in order to apply the n'th command log during
 // the current term.
 func (e *Event) Command(n uint64) *Dispatch {
-	e.control.t.Helper()
+	e.term.control.t.Helper()
 
 	if e.isScheduled {
-		e.control.t.Fatal("raft-test: error: term event already scheduled")
+		e.term.control.t.Fatal("raft-test: error: term event already scheduled")
 	}
 	e.isScheduled = true
 
 	return &Dispatch{
-		control:    e.control,
-		id:         e.id,
-		leadership: e.leadership,
-		n:          n,
+		term: e.term,
+		n:    n,
 	}
 }
 
 // Dispatch defines at which phase of the dispatch process a command log event
 // should fire.
 type Dispatch struct {
-	control    *Control
-	id         raft.ServerID
-	leadership *election.Leadership
-	n          uint64
-	event      *event.Event
+	term  *Term
+	n     uint64
+	event *event.Event
 }
 
 // Enqueued configures the command log event to occurr when the command log is
 // enqueued, but not yet appended by the followers.
 func (d *Dispatch) Enqueued() *Action {
-	d.control.t.Helper()
+	d.term.control.t.Helper()
 
 	if d.event != nil {
-		d.control.t.Fatal("raft-test: error: dispatch event already defined")
+		d.term.control.t.Fatal("raft-test: error: dispatch event already defined")
 	}
-	d.event = d.control.whenCommandEnqueued(d.id, d.n)
+	d.event = d.term.control.whenCommandEnqueued(d.term.id, d.n)
 
 	return &Action{
-		control:    d.control,
-		id:         d.id,
-		leadership: d.leadership,
-		event:      d.event,
+		term:  d.term,
+		event: d.event,
 	}
 }
 
 // Appended configures the command log event to occurr when the command log is
 // appended by all followers, but not yet committed by the leader.
 func (d *Dispatch) Appended() *Action {
-	d.control.t.Helper()
+	d.term.control.t.Helper()
 
 	if d.event != nil {
-		d.control.t.Fatal("raft-test: error: dispatch event already defined")
+		d.term.control.t.Fatal("raft-test: error: dispatch event already defined")
 	}
 
-	d.event = d.control.whenCommandAppended(d.id, d.n)
+	d.event = d.term.control.whenCommandAppended(d.term.id, d.n)
 
 	return &Action{
-		control:    d.control,
-		id:         d.id,
-		leadership: d.leadership,
-		event:      d.event,
+		term:  d.term,
+		event: d.event,
 	}
 }
 
 // Committed configures the command log event to occurr when the command log is
 // committed.
 func (d *Dispatch) Committed() *Action {
-	d.control.t.Helper()
+	d.term.control.t.Helper()
 
 	if d.event != nil {
-		d.control.t.Fatal("raft-test: error: dispatch event already defined")
+		d.term.control.t.Fatal("raft-test: error: dispatch event already defined")
 	}
 
-	d.event = d.control.whenCommandCommitted(d.id, d.n)
+	d.event = d.term.control.whenCommandCommitted(d.term.id, d.n)
 
 	return &Action{
-		control:    d.control,
-		id:         d.id,
-		leadership: d.leadership,
-		event:      d.event,
+		term:  d.term,
+		event: d.event,
 	}
 }
 
 // Action defines what should happen when the event defined in the term occurs.
 type Action struct {
-	control    *Control
-	id         raft.ServerID
-	leadership *election.Leadership
-	event      *event.Event
+	term  *Term
+	event *event.Event
 }
 
 // Depose makes the action depose the current leader.
 func (a *Action) Depose() {
-	a.control.t.Helper()
+	a.term.control.t.Helper()
 	//a.control.t.Logf(
 	//"raft-test: event: schedule depose server %s when command %d gets %s", a.id, a.n, a.phase)
 
-	a.control.deposing = make(chan struct{})
+	a.term.control.deposing = make(chan struct{})
 
 	go func() {
 		//c.t.Logf("raft-test: node %d: fsm: wait log command %d", i, n)
-		a.control.deposeUponEvent(a.event, a.id, a.leadership)
+		a.term.control.deposeUponEvent(a.event, a.term.id, a.term.leadership)
 	}()
 }
 
@@ -173,30 +206,12 @@ func (a *Action) Depose() {
 // The typical use is to take the snapshot after a certain command log gets
 // committed (see Dispatch.Committed()).
 func (a *Action) Snapshot() {
-	a.control.t.Helper()
+	a.term.control.t.Helper()
 	// a.control.t.Logf(
 	// 	"raft-test: event: schedule snapshot server %s when command %d gets %s", a.id, a.n, a.phase)
 
 	go func() {
 		//c.t.Logf("raft-test: node %d: fsm: wait log command %d", i, n)
-		a.control.snapshotUponEvent(a.event, a.id)
-	}()
-}
-
-// Disconnect makes the action disconnect a follower, which will stop
-// receiving RPCs.
-func (a *Action) Disconnect(id raft.ServerID) {
-	go func() {
-		//c.t.Logf("raft-test: node %d: fsm: wait log command %d", i, n)
-		a.control.disconnectUponEvent(a.event, a.id, id)
-	}()
-}
-
-// Reconnect makes the action reconnect a previously disconnected
-// follower, which will start receiving RPCs again.
-func (a *Action) Reconnect(id raft.ServerID) {
-	go func() {
-		//c.t.Logf("raft-test: node %d: fsm: wait log command %d", i, n)
-		a.control.reconnectUponEvent(a.event, a.id, id)
+		a.term.control.snapshotUponEvent(a.event, a.term.id)
 	}()
 }
