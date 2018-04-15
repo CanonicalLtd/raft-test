@@ -79,7 +79,7 @@ func Cluster(t testing.TB, fsms []raft.FSM, options ...Option) (map[raft.ServerI
 
 	// Instrument all servers by replacing their fsms with wrapper fsms,
 	// creating a watcher to observe them.
-	watcher := instrumentFSMs(t, dependencies)
+	watcher := instrumentFSMs(logger, dependencies)
 
 	// Bootstrap the initial cluster configuration.
 	bootstrapCluster(t, logger, dependencies)
@@ -217,8 +217,8 @@ func instrumentTransports(logger *log.Logger, dependencies []*dependencies) *net
 // Replace the dependencies.FSM object on each server with a wrapper FSM that
 // wraps the real FSM. Return a watcher object that can be used to get notified
 // of various events.
-func instrumentFSMs(t testing.TB, dependencies []*dependencies) *fsms.Watcher {
-	watcher := fsms.New(t)
+func instrumentFSMs(logger *log.Logger, dependencies []*dependencies) *fsms.Watcher {
+	watcher := fsms.New(logger)
 
 	for _, d := range dependencies {
 		d.FSM = watcher.Add(d.Conf.LocalID, d.FSM)

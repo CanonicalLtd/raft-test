@@ -15,7 +15,7 @@
 package fsms
 
 import (
-	"testing"
+	"log"
 
 	"github.com/CanonicalLtd/raft-test/internal/event"
 	"github.com/hashicorp/raft"
@@ -23,24 +23,24 @@ import (
 
 // Watcher watches all FSMs of a cluster, firing events at certain moments.
 type Watcher struct {
-	t testing.TB
+	logger *log.Logger
 
 	// FSM wrappers.
 	fsms map[raft.ServerID]*fsmWrapper
 }
 
 // New create a new FSMs watcher for watching the underlying FSMs.
-func New(t testing.TB) *Watcher {
+func New(logger *log.Logger) *Watcher {
 	return &Watcher{
-		t:    t,
-		fsms: make(map[raft.ServerID]*fsmWrapper),
+		logger: logger,
+		fsms:   make(map[raft.ServerID]*fsmWrapper),
 	}
 }
 
 // Add an FSM to the watcher. Returns an FSM that wraps the given FSM with
 // instrumentation for firing events.
 func (w *Watcher) Add(id raft.ServerID, fsm raft.FSM) raft.FSM {
-	w.fsms[id] = newFSMWrapper(w.t, id, fsm)
+	w.fsms[id] = newFSMWrapper(w.logger, id, fsm)
 	return w.fsms[id]
 }
 
