@@ -222,8 +222,8 @@ func (c *Control) shutdownServers() {
 		errors[id] = make(chan error, 1)
 	}
 	for id, future := range futures {
-		timer := time.After(timeout)
 		go func(id raft.ServerID, future raft.Future) {
+			timer := time.After(timeout)
 			select {
 			case errors[id] <- future.Error():
 				c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)

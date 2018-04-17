@@ -17,8 +17,8 @@ package fsms
 import (
 	"encoding/binary"
 	"io"
+	"log"
 	"sync"
-	"testing"
 
 	"github.com/CanonicalLtd/raft-test/internal/event"
 	"github.com/hashicorp/raft"
@@ -27,7 +27,7 @@ import (
 
 // Wraps a raft.FSM, adding control on logs, snapshots and restores.
 type fsmWrapper struct {
-	t testing.TB
+	logger *log.Logger
 
 	// ID of of the raft server associated with this FSM.
 	id raft.ServerID
@@ -50,9 +50,9 @@ type fsmWrapper struct {
 	mu sync.RWMutex
 }
 
-func newFSMWrapper(t testing.TB, id raft.ServerID, fsm raft.FSM) *fsmWrapper {
+func newFSMWrapper(logger *log.Logger, id raft.ServerID, fsm raft.FSM) *fsmWrapper {
 	return &fsmWrapper{
-		t:      t,
+		logger: logger,
 		id:     id,
 		fsm:    fsm,
 		events: make(map[uint64][]*event.Event),
@@ -66,6 +66,7 @@ func (f *fsmWrapper) Apply(log *raft.Log) interface{} {
 	f.commands++
 	f.mu.Unlock()
 
+	f.logger.Printf("[DEBUG] raft-test: fsm %s: applied %d", f.id, f.commands)
 	if events, ok := f.events[f.commands]; ok {
 		for _, event := range events {
 			event.Fire()
@@ -125,6 +126,8 @@ func (f *fsmWrapper) Restore(reader io.ReadCloser) error {
 // It resets the internal state of the fsm, such as the list of applied command
 // logs and the scheduled events.
 func (f *fsmWrapper) electing() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for n := range f.events {
 		delete(f.events, n)
 	}
