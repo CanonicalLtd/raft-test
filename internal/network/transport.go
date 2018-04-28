@@ -111,7 +111,7 @@ func (t *eventTransport) AppendEntries(
 		args, faulty = t.schedule.FilterRequest(n, args)
 		if faulty && t.schedule.IsEnqueueFault() {
 			t.logger.Printf(
-				"[DEBUG] raft-test: server %s: transport: append to: %s: enqueue fault: command %d", t.id, id, t.schedule.Command())
+				"[DEBUG] raft-test: server %s: transport: append to %s: enqueue fault: command %d", t.id, id, t.schedule.Command())
 		}
 	}
 
