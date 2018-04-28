@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"log"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
@@ -211,47 +210,38 @@ func (c *Control) shutdownServers() {
 		futures[id] = r.Shutdown()
 	}
 
-	// Expect the shutdown to happen within a second by default.
+	// Expect the shutdown to happen within two seconds by default.
 	timeout := Duration(2 * time.Second)
-	wg := sync.WaitGroup{}
-	wg.Add(len(c.servers))
 
 	// Watch for errors.
-	errors := make(map[raft.ServerID]chan error)
-	for id := range futures {
-		errors[id] = make(chan error, 1)
-	}
+	errors := make(map[raft.ServerID]error)
 	for id, future := range futures {
-		go func(id raft.ServerID, future raft.Future) {
-			timer := time.After(timeout)
-			select {
-			case errors[id] <- future.Error():
-				c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)
-			case <-timer:
-			}
-			wg.Done()
-		}(id, future)
-	}
-	wg.Wait()
-	failed := false
-	for id := range futures {
+		timer := time.After(timeout)
+		ch := make(chan error, 1)
+		go func(future raft.Future) {
+			ch <- future.Error()
+		}(future)
 		select {
-		case err := <-errors[id]:
-			if err != nil {
-				c.t.Errorf("raft-test: close: error: server %s: shutdown error: %v", id, err)
-				failed = true
-			}
-		default:
-			buf := make([]byte, 1<<16)
-			n := runtime.Stack(buf, true)
-
-			c.t.Errorf("raft-test: close: error: server %s: did not shutdown within %s", id, timeout)
-			c.t.Errorf("\n\t%s", buf[:n])
-			failed = true
+		case err := <-ch:
+			c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)
+			errors[id] = err
+		case <-timer:
+			err := fmt.Errorf("timeout (%s)", timeout)
+			c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown failed: %s", id, err)
+			errors[id] = err
 		}
 	}
-	if failed {
-		c.t.Fatalf("raft-test: close: one or more servers did not shutdown cleanly")
+
+	for id := range futures {
+		err := errors[id]
+		if err == nil {
+			continue
+		}
+		buf := make([]byte, 1<<16)
+		n := runtime.Stack(buf, true)
+
+		c.t.Errorf("\n\t%s", buf[:n])
+		c.t.Fatalf("raft-test: close: error: server %s: shutdown error: %v", id, err)
 	}
 }
 

@@ -81,7 +81,7 @@ func Latency(factor float64) Option {
 }
 
 // DiscardLogger is a convenience around Config that sets the output stream of
-// raft's logger to ioutil.Discard
+// raft's logger to ioutil.Discard.
 func DiscardLogger() Option {
 	return Config(func(i int, config *raft.Config) {
 		config.Logger = log.New(ioutil.Discard, "", 0)
