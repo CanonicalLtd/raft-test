@@ -203,46 +203,68 @@ func (c *Control) Restores(id raft.ServerID) uint64 {
 // Shutdown all raft nodes and fail the test if any of them errors out while
 // doing so.
 func (c *Control) shutdownServers() {
-	// Trigger the shutdown on all the nodes.
-	futures := make(map[raft.ServerID]raft.Future)
+	// Find the leader if there is one, and shut it down first. This should
+	// prevent it from getting stuck on shutdown while trying to send RPCs
+	// to the followers.
+	//
+	// TODO: this is arguably a workaround for a bug in the transport
+	// wrapper.
+	ids := make([]raft.ServerID, 0)
 	for id, r := range c.servers {
-		c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown start", id)
-		futures[id] = r.Shutdown()
+		if r.State() == raft.Leader {
+			c.shutdownServer(id)
+			ids = append(ids, id)
+		}
 	}
+
+	// Shutdown the rest.
+	for id := range c.servers {
+		hasShutdown := false
+		for i := range ids {
+			if ids[i] == id {
+				hasShutdown = true
+				break
+			}
+		}
+		if hasShutdown {
+			c.shutdownServer(id)
+			ids = append(ids, id)
+		}
+	}
+}
+
+// Shutdown a single server.
+func (c *Control) shutdownServer(id raft.ServerID) {
+	r := c.servers[id]
+	future := r.Shutdown()
 
 	// Expect the shutdown to happen within two seconds by default.
 	timeout := Duration(2 * time.Second)
 
 	// Watch for errors.
-	errors := make(map[raft.ServerID]error)
-	for id, future := range futures {
-		timer := time.After(timeout)
-		ch := make(chan error, 1)
-		go func(future raft.Future) {
-			ch <- future.Error()
-		}(future)
-		select {
-		case err := <-ch:
-			c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)
-			errors[id] = err
-		case <-timer:
-			err := fmt.Errorf("timeout (%s)", timeout)
-			c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown failed: %s", id, err)
-			errors[id] = err
-		}
+	ch := make(chan error, 1)
+	go func(future raft.Future) {
+		ch <- future.Error()
+	}(future)
+
+	var err error
+	select {
+	case err = <-ch:
+		c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown done", id)
+	case <-time.After(timeout):
+		err = fmt.Errorf("timeout (%s)", timeout)
+	}
+	if err == nil {
+		return
 	}
 
-	for id := range futures {
-		err := errors[id]
-		if err == nil {
-			continue
-		}
-		buf := make([]byte, 1<<16)
-		n := runtime.Stack(buf, true)
+	c.logger.Printf("[DEBUG] raft-test: close: server %s: shutdown failed: %s", id, err)
 
-		c.t.Errorf("\n\t%s", buf[:n])
-		c.t.Fatalf("raft-test: close: error: server %s: shutdown error: %v", id, err)
-	}
+	buf := make([]byte, 1<<16)
+	n := runtime.Stack(buf, true)
+
+	c.t.Errorf("\n\t%s", buf[:n])
+	c.t.Fatalf("raft-test: close: error: server %s: shutdown error: %v", id, err)
 }
 
 // Wait for the given server to acquire leadership. Returns true on success,
