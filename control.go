@@ -42,8 +42,8 @@ type Control struct {
 	errored  bool
 	deposing chan struct{}
 
-	// Current leader of the cluster, if any.
-	leader raft.ServerID
+	// Current Term after Elect() was called, if any.
+	term *Term
 
 	// Future of any pending snapshot that has been scheduled with an
 	// event.
@@ -120,13 +120,15 @@ func (c *Control) Elect(id raft.ServerID) *Term {
 		// F1 ---> F2
 		//
 		// This way the cluster is fully connected. foo
-		c.leader = id
 		c.logger.Printf("[DEBUG] raft-test: elect: done")
-		return &Term{
+		term := &Term{
 			control:    c,
 			id:         id,
 			leadership: leadership,
 		}
+		c.term = term
+
+		return term
 	}
 	c.t.Fatalf("raft-test: server %s: did not acquire stable leadership", id)
 
@@ -149,7 +151,7 @@ func (c *Control) Barrier() {
 	}
 
 	// Wait for inflight commands to be applied to the leader's FSM.
-	if c.leader != "" {
+	if c.term.id != "" {
 		// Set a relatively high timeout.
 		//
 		// TODO: let users specify the maximum amount of time a single
@@ -157,19 +159,19 @@ func (c *Control) Barrier() {
 		// accordingly.
 		timeout := Duration(time.Second)
 
-		if err := c.servers[c.leader].Barrier(timeout).Error(); err != nil {
+		if err := c.servers[c.term.id].Barrier(timeout).Error(); err != nil {
 			c.t.Fatalf("raft-test: leader barrier: %v", err)
 		}
 
 		// Wait for follower FSMs to catch up.
-		n := c.Commands(c.leader)
+		n := c.Commands(c.term.id)
 		events := make([]*event.Event, 0)
 		for id := range c.servers {
-			if id == c.leader {
+			if id == c.term.id {
 				continue
 			}
 			// Skip disconnected followers.
-			if !c.network.PeerConnected(c.leader, id) {
+			if !c.network.PeerConnected(c.term.id, id) {
 				continue
 			}
 			event := c.watcher.WhenApplied(id, n)
@@ -180,6 +182,20 @@ func (c *Control) Barrier() {
 			event.Ack()
 		}
 	}
+}
+
+// Depose the current leader.
+//
+// When calling this method a leader must have been previously elected with
+// Elect().
+//
+// It must not be called if the current term has scheduled a depose action with
+// Action.Depose().
+func (c *Control) Depose() {
+	event := event.New()
+	go c.deposeUponEvent(event, c.term.id, c.term.leadership)
+	event.Fire()
+	event.Block()
 }
 
 // Commands returns the total number of command logs applied by the FSM of the
@@ -400,7 +416,7 @@ func (c *Control) deposeUponEvent(event *event.Event, id raft.ServerID, leadersh
 
 	c.deposing <- struct{}{}
 	c.deposing = nil
-	c.leader = ""
+	c.term = nil
 }
 
 // Take a snapshot on the server with the given ID when the given event fires.

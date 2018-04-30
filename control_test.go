@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Elect a leader.
-func TestControl_Elect(t *testing.T) {
+// Elect and depose a leader.
+func TestControl_ElectAndDepose(t *testing.T) {
 	rafts, control := rafttest.Cluster(t, rafttest.FSMs(3), rafttest.DiscardLogger())
 	defer control.Close()
 
@@ -34,6 +34,10 @@ func TestControl_Elect(t *testing.T) {
 
 	r := rafts["0"]
 	assert.Equal(t, raft.Leader, r.State())
+
+	control.Depose()
+
+	assert.NotEqual(t, raft.Leader, r.State())
 }
 
 // Depose a previously elected leader after a certain command log gets
