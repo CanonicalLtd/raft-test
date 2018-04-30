@@ -100,6 +100,14 @@ func (c *Control) Elect(id raft.ServerID) *Term {
 	for n := 0; n < maxElectionRounds; n++ {
 		leadership := c.waitLeadershipAcquired(id)
 
+		// We did not acquire leadership, let's retry.
+		if leadership == nil {
+			if n < maxElectionRounds {
+				c.logger.Printf("[DEBUG] raft-test: elect: server %s: retry %d ", id, n+1)
+				continue
+			}
+		}
+
 		// The given node became the leader, let's make sure
 		// that leadership is stable and that other nodes
 		// become followers.
