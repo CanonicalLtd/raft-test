@@ -185,6 +185,12 @@ func (t *eventTransport) SetHeartbeatHandler(cb func(rpc raft.RPC)) {
 	t.trans.SetHeartbeatHandler(cb)
 }
 
+
+// TimeoutNow is used to start a leadership transfer to the target node.
+func (t *eventTransport) TimeoutNow(id raft.ServerID, target raft.ServerAddress, args *raft.TimeoutNowRequest, resp *raft.TimeoutNowResponse) error {
+	return nil
+}
+
 func (t *eventTransport) Close() error {
 	if closer, ok := t.trans.(raft.WithClose); ok {
 		return closer.Close()
